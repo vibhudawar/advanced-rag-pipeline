@@ -1,0 +1,187 @@
+# ============================================================================
+# Environment Variables
+# ============================================================================
+.env
+.env.*
+!.env.example
+*.env
+
+# ============================================================================
+# Python
+# ============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# Virtual Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# ============================================================================
+# IDE / Editor
+# ============================================================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# vim
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
+!.claude/settings.json
+.claude/settings.local.json
+
+# ============================================================================
+# Database Files (Ephemeral - Don't Push)
+# ============================================================================
+# SQLite conversation history (recreated on run)
+chatbot.db
+chatbot.db-shm
+chatbot.db-wal
+*.db
+*.sqlite
+*.sqlite3
+
+# Metadata files (no longer used, but just in case)
+documents_metadata.json
+
+# ============================================================================
+# Operating System
+# ============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================================================
+# Logs
+# ============================================================================
+*.log
+logs/
+*.log.*
+
+# ============================================================================
+# Streamlit
+# ============================================================================
+.streamlit/secrets.toml
+.streamlit/config.toml
+
+# ============================================================================
+# LangSmith / LangChain
+# ============================================================================
+.langchain/
+langchain.db
+
+# ============================================================================
+# Temporary Files
+# ============================================================================
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# ============================================================================
+# Project-Specific (Optional - Uncomment if needed)
+# ============================================================================
+# Uploaded documents (if you want to store them locally)
+# uploads/
+# documents/
+
+# Test files
+# test_*.py
+# *_test.py
+
+# Experimental notebooks
+# experiments/
+# notebooks/
+
+# Local development scripts
+# dev_*.py
+# scratch/
