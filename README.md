@@ -12,6 +12,7 @@ A complete Retrieval-Augmented Generation (RAG) application with advanced featur
 
 - [Features](#-features)
 - [Architecture](#-architecture)
+- [Architecture Visualization](#-architecture-visualization)
 - [Project Structure](#-project-structure)
 - [Installation](#-installation)
 - [Configuration](#-configuration)
@@ -102,6 +103,79 @@ Response        ↓
     └────→  Generate Answer
                 ↓
               END
+```
+
+---
+
+## 🎨 Architecture Visualization
+
+Visual representations of the RAG pipeline built with LangGraph, showing the complete flow from user query to generated response.
+
+### 1️⃣ Detailed Flow Graph
+
+The comprehensive view showing all nodes, state management, and data flow through the pipeline:
+
+![Detailed Flow Graph](assets/mermaid%20graphs/detailed-flow-graph.png)
+
+**This diagram shows:**
+- 🔍 Query classification and routing logic
+- 📝 Query expansion with multi-query generation
+- 🔎 Vector search and document retrieval
+- 🎯 Reranking with score filtering (threshold ≥ 0.1)
+- 🤖 LLM generation with context and source extraction
+- 💾 State management and conversation memory
+- 🗄️ Checkpoint persistence with SqliteSaver
+
+---
+
+### 2️⃣ Component Flow Graph
+
+High-level system architecture showing the relationship between frontend, backend, and external services:
+
+![Component Flow Graph](assets/mermaid%20graphs/component-flow-graph.png)
+
+**This diagram shows:**
+- 🎨 Streamlit UI components (Ingestion & Chat tabs)
+- ⚙️ Backend pipelines (Ingestion & RAG)
+- 🌐 External service integrations
+  - OpenAI for embeddings and LLM
+  - Pinecone for vector storage
+  - Cohere for reranking
+  - LangSmith for tracing (optional)
+
+---
+
+### 3️⃣ Data Flow Graph
+
+Detailed view of data structures and transformations at each stage:
+
+![Data Flow Graph](assets/mermaid%20graphs/data-flow-graph.png)
+
+**This diagram shows:**
+- 📥 Input: User query string + thread ID
+- ⚙️ Processing stages with input/output types:
+  - Classification: `str` → `query_type`
+  - Expansion: `str` → `List[str]` (3 variants)
+  - Retrieval: `List[str]` → `List[Document]` (10-20 docs)
+  - Reranking: `List[Document]` → `List[Document]` (top 5 with scores)
+  - Generation: `str + List[Document]` → `str + sources`
+- 💾 GraphState TypedDict fields
+- 📤 Output: AI response + source metadata
+
+---
+
+### 🔄 Pipeline Execution Flow
+
+```
+User Query → LangGraph Workflow → Response
+
+1. classify_query_node     : Determines if query needs RAG or simple response
+2. simple_response_node    : Handles greetings/thanks (no document retrieval)
+   OR
+3. expand_query_node       : Generates 3 query variants for better retrieval
+4. retrieve_documents_node : Searches Pinecone for relevant documents (top_k=10)
+5. rerank_node            : Reranks with Cohere, filters score < 0.1 (top_k=5)
+6. generate_node          : LLM generates answer with context + extracts sources
 ```
 
 ---
