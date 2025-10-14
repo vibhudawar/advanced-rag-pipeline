@@ -27,7 +27,7 @@ from src.ingestion.EmbeddingCreator import get_embedder
 from src.ingestion.DBIngestion import get_vector_store
 from src.generation.llm_generator import expand_query, get_llm_generator
 from src.reranking.reranker import get_reranker
-from src.utils.Helpers import ensure_index_exists
+from src.utils.Helpers import ensure_index_exists, save_document_metadata
 from config import EMBEDDING_PROVIDER, LLM_PROVIDER
 
 
@@ -128,6 +128,16 @@ def ingest_documents(
                 all_chunks.extend(chunks)
                 file_time = time.time() - file_start_time
 
+                # Save success metadata to database
+                save_document_metadata(
+                    filename=filename,
+                    file_size=file_size,
+                    file_type=parsed_doc['metadata']['file_type'],
+                    num_chunks=len(chunks),
+                    status="success",
+                    ingestion_time=file_time
+                )
+
                 file_results.append({
                     "filename": filename,
                     "status": "success",
@@ -138,6 +148,16 @@ def ingest_documents(
             except Exception as e:
                 file_time = time.time() - file_start_time
                 print(f"   [ERROR] Failed to process {filename}: {str(e)}")
+
+                # Save failure metadata to database
+                save_document_metadata(
+                    filename=filename,
+                    file_size=file_size,
+                    file_type=file_extension.lstrip('.'),
+                    num_chunks=0,
+                    status="failed",
+                    ingestion_time=file_time
+                )
 
                 file_results.append({
                     "filename": filename,

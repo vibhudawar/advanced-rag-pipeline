@@ -200,20 +200,6 @@ class PineconeVectorStore(VectorStore):
         except Exception as e:
             raise RuntimeError(f"Failed to list Pinecone indexes: {str(e)}")
 
-    def get_index_stats(self, index_name: str) -> Dict[str, Any]:
-        """Get statistics for a Pinecone index"""
-        try:
-            index = self.pc.Index(index_name)
-            stats = index.describe_index_stats()
-            return {
-                "total_vector_count": stats.total_vector_count,
-                "dimension": stats.dimension,
-                "namespaces": stats.namespaces
-            }
-        except Exception as e:
-            print(f"[WARN] Failed to get index stats: {e}")
-            return {"total_vector_count": 0, "dimension": 0, "namespaces": {}}
-
 
 def get_vector_store() -> VectorStore:
     """Factory function to get the appropriate vector store"""

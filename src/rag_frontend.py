@@ -14,8 +14,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 # Import backend functions
 from src.main_app import ingest_documents, retrieve_and_generate
-from src.ingestion.DBIngestion import get_vector_store
-from src.utils.Helpers import get_all_documents, retrieve_all_threads, get_conversation_history
+from src.utils.Helpers import get_all_documents, retrieve_all_threads, get_conversation_history, init_documents_table
 
 # Import UI components
 from src.ui.components import (
@@ -40,6 +39,9 @@ INDEX_NAME = "rag-documents"
 
 def initialize_session_state():
     """Initialize Streamlit session state variables."""
+    # Initialize database tables
+    init_documents_table()
+
     if "current_tab" not in st.session_state:
         st.session_state.current_tab = "ingestion"
 
@@ -78,15 +80,22 @@ def reset_chat():
 def load_conversation(thread_id: str):
     """Load conversation from a thread."""
     st.session_state.thread_id = thread_id
-    messages = get_conversation_history(thread_id)
+    conversation_data = get_conversation_history(thread_id)
+    messages = conversation_data.get("messages", [])
+    sources = conversation_data.get("sources", [])
 
     # Convert to session state format
     temp_messages = []
+    ai_message_index = -1
+
     for msg in messages:
         if isinstance(msg, HumanMessage):
             temp_messages.append({"role": "user", "content": msg.content, "sources": []})
         elif isinstance(msg, AIMessage):
-            temp_messages.append({"role": "assistant", "content": msg.content, "sources": []})
+            ai_message_index += 1
+            # Only add sources to the last AI message (most recent response)
+            msg_sources = sources if ai_message_index == len([m for m in messages if isinstance(m, AIMessage)]) - 1 else []
+            temp_messages.append({"role": "assistant", "content": msg.content, "sources": msg_sources})
 
     st.session_state.message_history = temp_messages
 
@@ -148,14 +157,13 @@ def render_ingestion_tab():
 
     st.divider()
 
-    # Show existing documents
-    try:
-        vector_store = get_vector_store()
-        documents = get_all_documents(vector_store, INDEX_NAME)
-        if documents:
-            display_documents_table(documents)
-    except Exception as e:
-        st.info(f"Unable to retrieve document statistics: {str(e)}")
+    # Show existing documents from database
+    st.subheader("📚 Ingested Documents")
+    documents = get_all_documents()
+    if documents:
+        display_documents_table(documents)
+    else:
+        st.info("No documents ingested yet. Upload files above to get started.")
 
 
 def process_documents(config: Dict[str, Any]):
