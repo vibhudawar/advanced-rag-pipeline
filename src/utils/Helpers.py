@@ -74,25 +74,33 @@ def get_conversation_history(
 
 def retrieve_all_threads(db_path: str = "chatbot.db") -> List[str]:
     """
-    Retrieve all conversation thread IDs from the database.
+    Retrieve all conversation thread IDs sorted by most recent first.
 
     Args:
         db_path: Path to SQLite database file
 
     Returns:
-        List of unique thread IDs
+        List of thread IDs sorted by timestamp (newest first)
     """
     try:
         conn = sqlite3.connect(database=db_path, check_same_thread=False)
         checkpointer = SqliteSaver(conn=conn)
 
-        all_threads = set()
+        # Collect threads with their most recent timestamp
+        threads_with_ts = {}
         for checkpoint in checkpointer.list(None):
             thread_id = checkpoint.config.get("configurable", {}).get("thread_id")
             if thread_id:
-                all_threads.add(thread_id)
+                # Get timestamp from checkpoint
+                ts = checkpoint.checkpoint.get("ts", 0)
+                # Keep only the latest timestamp for each thread
+                if thread_id not in threads_with_ts or ts > threads_with_ts[thread_id]:
+                    threads_with_ts[thread_id] = ts
 
-        return list(all_threads)
+        # Sort by timestamp descending (newest first)
+        sorted_threads = sorted(threads_with_ts.items(), key=lambda x: x[1], reverse=True)
+        return [thread_id for thread_id, _ in sorted_threads]
+
     except Exception as e:
         print(f"[WARN] Could not retrieve threads: {e}")
         return []
