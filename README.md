@@ -8,6 +8,16 @@ A complete Retrieval-Augmented Generation (RAG) application with advanced featur
 
 ---
 
+## 🎥 Project Walkthrough
+
+Watch the complete project walkthrough to see the RAG application in action:
+
+[![RAG Application Walkthrough](https://img.youtube.com/vi/lFXB7Xby528/maxresdefault.jpg)](https://youtu.be/lFXB7Xby528)
+
+*Click the image above to watch the full walkthrough on YouTube*
+
+---
+
 ## 📋 Table of Contents
 
 - [Features](#-features)
