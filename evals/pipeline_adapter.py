@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import time
 
+from langchain_core.documents import Document
+
 from config import EMBEDDING_PROVIDER, LLM_PROVIDER
 from src.generation.llm_generator import expand_query, get_llm_generator
 from src.ingestion.DBIngestion import get_vector_store
 from src.ingestion.EmbeddingCreator import get_embedder
 from src.reranking.reranker import get_reranker
+from src.retrieval.hybrid import BM25Index, reciprocal_rank_fusion
 
 from .schema import RunResult, content_hash
 
@@ -91,5 +94,74 @@ class BaselinePipeline:
             return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))
 
 
+def _fetch_all_texts(pc_index, text_key: str = "text", batch: int = 100) -> list[str]:
+    """Pull every chunk's text from a Pinecone index (to build the BM25 corpus)."""
+    ids: list[str] = []
+    for page in pc_index.list():
+        ids.extend(page if isinstance(page, list) else [page])
+    texts: list[str] = []
+    for i in range(0, len(ids), batch):
+        resp = pc_index.fetch(ids=ids[i:i + batch])
+        vectors = getattr(resp, "vectors", None) or resp.get("vectors", {})
+        for v in vectors.values():
+            md = getattr(v, "metadata", None) or v.get("metadata", {})
+            if md and md.get(text_key):
+                texts.append(md[text_key])
+    return texts
+
+
+class HybridPipeline(BaselinePipeline):
+    """BM25 + vector, fused with RRF, then reranked/generated exactly like the baseline.
+
+    The ONLY delta vs BaselinePipeline is the retrieval set (lexical results fused in), so a
+    metric change is attributable to hybridization. Vector and BM25 each contribute their
+    top_k; expansion is off by default to keep the comparison clean.
+    """
+
+    label = "hybrid"
+
+    def __init__(self, index_name: str, top_k: int = 10, rerank_top_k: int = 5,
+                 use_expansion: bool = False, retrieval_only: bool = False, rrf_k: int = 60):
+        super().__init__(index_name, top_k=top_k, rerank_top_k=rerank_top_k,
+                         use_expansion=use_expansion, retrieval_only=retrieval_only)
+        texts = _fetch_all_texts(self.vector_store.pc.Index(index_name))
+        self.bm25 = BM25Index([content_hash(t) for t in texts], texts)
+        self.rrf_k = rrf_k
+
+    def run(self, query: str) -> RunResult:
+        t0 = time.time()
+        try:
+            vec_docs = self.vector_store.similarity_search(
+                index_name=self.index_name, query=query,
+                embedder=self.embedder, top_k=self.top_k,
+            )
+            vec_hashes = [content_hash(d.page_content) for d in vec_docs]
+            bm25_hashes = self.bm25.search(query, self.top_k)
+            fused = reciprocal_rank_fusion([vec_hashes, bm25_hashes], k=self.rrf_k)
+
+            if self.retrieval_only:
+                return RunResult(query=query, answer="", candidate_hashes=fused,
+                                 latency_s=time.time() - t0)
+
+            by_hash = {content_hash(d.page_content): d for d in vec_docs}
+            docs = []
+            for h in fused[:self.top_k]:
+                if h in by_hash:
+                    docs.append(by_hash[h])
+                elif h in self.bm25.texts_by_key:
+                    docs.append(Document(page_content=self.bm25.texts_by_key[h]))
+            reranked = self.reranker.rerank(query=query, documents=docs,
+                                            top_k=self.rerank_top_k) if docs else []
+            contexts = [d.page_content for d in reranked]
+            answer = "".join(self.generator.generate_stream(query, reranked)) if reranked else ""
+            return RunResult(
+                query=query, answer=answer, candidate_hashes=fused,
+                retrieved_hashes=[content_hash(c) for c in contexts],
+                contexts=contexts, latency_s=time.time() - t0,
+            )
+        except Exception as e:  # noqa: BLE001 - eval harness: capture, don't crash the run
+            return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))
+
+
 # Registry so evaluate.py --pipeline <name> can pick one.
-PIPELINES = {"baseline": BaselinePipeline}
+PIPELINES = {"baseline": BaselinePipeline, "hybrid": HybridPipeline}
