@@ -168,6 +168,14 @@ langchain.db
 *~
 
 # ============================================================================
+# Evals (WIN 1) — reports are disposable; the BEIR golden set (public data) IS committed.
+# data/golden.jsonl is NOT committed: it is generated from personal documents (PII).
+# ============================================================================
+evals/reports/
+data/beir/
+data/golden.jsonl
+
+# ============================================================================
 # Project-Specific (Optional - Uncomment if needed)
 # ============================================================================
 # Uploaded documents (if you want to store them locally)

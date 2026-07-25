@@ -1,0 +1,13 @@
+{
+  "beir-scifact": {
+    "k": 10,
+    "golden": "data/beir_scifact.jsonl",
+    "pipeline": "baseline",
+    "metrics": {
+      "hit_rate@10": 0.9033,
+      "mrr": 0.7588,
+      "ndcg@10": 0.7912
+    },
+    "updated": "2026-07-25"
+  }
+}

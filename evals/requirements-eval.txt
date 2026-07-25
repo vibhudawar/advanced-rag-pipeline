@@ -1,0 +1,3 @@
+# Extra deps for the BEIR path only. The own-corpus golden set, retrieval metrics, and
+# hand-rolled judges need nothing beyond the main requirements.txt.
+beir==2.0.0
