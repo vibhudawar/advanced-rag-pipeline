@@ -16,6 +16,18 @@ Measures retrieval and generation quality so every later change to the pipeline 
 Judge model ≠ generator model (generator = `gpt-4o-mini`, judge defaults to `gpt-4o`) so a
 model never grades its own output.
 
+## Results — retrieval (BEIR scifact, 2000-doc subset, 300 labelled queries)
+
+| Pipeline | hit_rate@10 | MRR | nDCG@10 |
+|---|---|---|---|
+| WIN 1 — vector-only (`text-embedding-3-small`) | 0.9033 | 0.7588 | 0.7912 |
+| **WIN 2 — hybrid (BM25 + vector, RRF k=60)** | **0.9200** | **0.7700** | **0.8005** |
+
+Hybrid improves every retrieval metric with no regression — the expected result on a
+lexically-precise corpus, where BM25 recovers exact-term matches (entities, rare terms)
+that dense vectors smooth over. Reproduce with
+`python -m evals.evaluate --index beir-scifact --golden data/beir_scifact.jsonl --pipeline hybrid --retrieval-only`.
+
 ## Prerequisites
 
 `.env` must contain: `PINECONE_API_KEY`, `COHERE_API_KEY`, and `OPENAI_API_KEY` and/or

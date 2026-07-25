@@ -2,12 +2,13 @@
   "beir-scifact": {
     "k": 10,
     "golden": "data/beir_scifact.jsonl",
-    "pipeline": "baseline",
+    "pipeline": "hybrid",
     "metrics": {
-      "hit_rate@10": 0.9033,
-      "mrr": 0.7588,
-      "ndcg@10": 0.7912
+      "hit_rate@10": 0.92,
+      "mrr": 0.77,
+      "ndcg@10": 0.8005
     },
-    "updated": "2026-07-25"
+    "updated": "2026-07-25",
+    "note": "WIN 2: hybrid (BM25+RRF) replaced vector-only baseline (was hit@10 0.9033 / MRR 0.7588 / nDCG@10 0.7912)."
   }
 }
