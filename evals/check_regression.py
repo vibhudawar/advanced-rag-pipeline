@@ -23,7 +23,19 @@ import sys
 import time
 from pathlib import Path
 
+from config import GEMINI_API_KEY, OPENAI_API_KEY, PINECONE_API_KEY
+
 from .evaluate import evaluate
+
+# Exit codes: 0 = pass, 1 = real regression, 2 = could-not-evaluate (config/infra).
+EXIT_PASS, EXIT_REGRESSION, EXIT_CANNOT_EVAL = 0, 1, 2
+
+
+def _missing_keys() -> list[str]:
+    missing = [] if PINECONE_API_KEY else ["PINECONE_API_KEY"]
+    if not (OPENAI_API_KEY or GEMINI_API_KEY):
+        missing.append("OPENAI_API_KEY or GEMINI_API_KEY")
+    return missing
 
 
 def _load(path: Path) -> dict:
@@ -46,10 +58,21 @@ def main() -> int:
     name = args.name or args.index
     baselines_path = Path(args.baselines)
 
+    missing = _missing_keys()
+    if missing:
+        print(f"[error] missing required API key(s): {', '.join(missing)}. "
+              "In CI, add these as GitHub Actions secrets (Settings -> Secrets and variables "
+              "-> Actions). This is a configuration problem, not a retrieval regression.")
+        return EXIT_CANNOT_EVAL
+
     report = evaluate(
         index=args.index, pipeline_name=args.pipeline, golden_path=args.golden,
         k=args.k, use_judge=False, judge_model=None, limit=None, retrieval_only=True,
     )
+    if report["n_errors"] >= report["n_items"] > 0:
+        print(f"[error] all {report['n_items']} evaluations errored — cannot assess regression "
+              "(check the index name, keys, and network). Not treating this as a regression.")
+        return EXIT_CANNOT_EVAL
     current = report["retrieval"]
 
     baselines = _load(baselines_path)
@@ -62,12 +85,12 @@ def main() -> int:
         baselines_path.parent.mkdir(parents=True, exist_ok=True)
         baselines_path.write_text(json.dumps(baselines, indent=2) + "\n")
         print(f"[baseline] updated '{name}' -> {current}")
-        return 0
+        return EXIT_PASS
 
     if name not in baselines:
         print(f"[error] no baseline for '{name}' in {baselines_path}. "
               f"Record one first: python -m evals.check_regression --index {args.index} --update")
-        return 2
+        return EXIT_CANNOT_EVAL
 
     base = baselines[name]["metrics"]
     tol = args.tolerance
@@ -95,10 +118,10 @@ def main() -> int:
             print(f"   - {m}: {c:.4f} < floor {floor:.4f} (baseline {b:.4f})")
         print("If this drop is expected/justified, update the baseline in the same PR "
               "(--update) and explain why in the PR description.")
-        return 1
+        return EXIT_REGRESSION
 
     print(f"[PASS] no retrieval regression beyond {tol:.0%}.")
-    return 0
+    return EXIT_PASS
 
 
 if __name__ == "__main__":
