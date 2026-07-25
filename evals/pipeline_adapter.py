@@ -22,6 +22,7 @@ from src.ingestion.DBIngestion import get_vector_store
 from src.ingestion.EmbeddingCreator import get_embedder
 from src.reranking.reranker import get_reranker
 from src.retrieval.hybrid import BM25Index, reciprocal_rank_fusion
+from src.retrieval.nlu import QueryUnderstander
 
 from .schema import RunResult, content_hash
 
@@ -163,5 +164,99 @@ class HybridPipeline(BaselinePipeline):
             return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))
 
 
+class NluHybridPipeline(HybridPipeline):
+    """Hybrid retrieval driven by an NLU understanding step (WIN 3).
+
+    Per query: understand() produces a restatement, intent, keyword queries (for BM25) and a
+    semantic query (for vectors). Non-rag intents are routed out (abstain). The keyword/semantic
+    split is fed to the two retrievers and fused with RRF. Optional soft metadata filtering
+    (fail-open) is off by default because the BEIR benchmark corpus has no such metadata; enable
+    it on a metadata-rich own corpus.
+    """
+
+    label = "nlu_hybrid"
+
+    def __init__(self, index_name: str, top_k: int = 10, rerank_top_k: int = 5,
+                 retrieval_only: bool = False, rrf_k: int = 60,
+                 use_metadata_filter: bool = False, nlu_model: str | None = None):
+        super().__init__(index_name, top_k=top_k, rerank_top_k=rerank_top_k,
+                         use_expansion=False, retrieval_only=retrieval_only, rrf_k=rrf_k)
+        self.understander = QueryUnderstander(model=nlu_model)
+        self.use_metadata_filter = use_metadata_filter
+
+    def _build_filter(self, u) -> dict | None:
+        f: dict = {}
+        if u.entities:
+            f["entities"] = {"$in": u.entities}
+        if u.doc_types:
+            f["file_type"] = {"$in": u.doc_types}
+        if u.date_start or u.date_end:
+            rng = {}
+            if u.date_start:
+                rng["$gte"] = u.date_start
+            if u.date_end:
+                rng["$lte"] = u.date_end
+            f["doc_date"] = rng
+        return f or None
+
+    def run(self, query: str) -> RunResult:
+        t0 = time.time()
+        try:
+            u = self.understander.understand(query)
+            if u.intent != "rag_query":
+                # greeting / off_topic: nothing to retrieve (routed out).
+                return RunResult(query=query, answer="", candidate_hashes=[],
+                                 latency_s=time.time() - t0)
+
+            # Additive design: NLU AUGMENTS the strong original signal, never replaces it.
+            # Vector runs on the restated query (== original for standalone queries); BM25 runs on
+            # the restated query PLUS the extracted keyword queries. So nlu_hybrid's retrieval set
+            # is a superset of hybrid's — NLU can only add recall, not lose the optimal top hit.
+            dense_q = u.restated_query or query
+            flt = self._build_filter(u) if self.use_metadata_filter else None
+            vec_docs = self.vector_store.similarity_search(
+                index_name=self.index_name, query=dense_q,
+                embedder=self.embedder, top_k=self.top_k, filter_dict=flt,
+            )
+            if flt and len(vec_docs) < 3:  # soft filtering: fail open if the filter is too strict
+                vec_docs = self.vector_store.similarity_search(
+                    index_name=self.index_name, query=dense_q,
+                    embedder=self.embedder, top_k=self.top_k,
+                )
+            vec_hashes = [content_hash(d.page_content) for d in vec_docs]
+
+            # dedupe while preserving order: restated query first, then keyword queries
+            lexical_qs = list(dict.fromkeys([dense_q, *u.keyword_queries])) or [query]
+            bm25_lists = [self.bm25.search(q, self.top_k) for q in lexical_qs]
+            fused = reciprocal_rank_fusion([vec_hashes, *bm25_lists], k=self.rrf_k)
+
+            if self.retrieval_only:
+                return RunResult(query=query, answer="", candidate_hashes=fused,
+                                 latency_s=time.time() - t0)
+
+            by_hash = {content_hash(d.page_content): d for d in vec_docs}
+            docs = []
+            for h in fused[:self.top_k]:
+                if h in by_hash:
+                    docs.append(by_hash[h])
+                elif h in self.bm25.texts_by_key:
+                    docs.append(Document(page_content=self.bm25.texts_by_key[h]))
+            reranked = self.reranker.rerank(query=u.restated_query, documents=docs,
+                                            top_k=self.rerank_top_k) if docs else []
+            contexts = [d.page_content for d in reranked]
+            answer = "".join(self.generator.generate_stream(u.restated_query, reranked)) if reranked else ""
+            return RunResult(
+                query=query, answer=answer, candidate_hashes=fused,
+                retrieved_hashes=[content_hash(c) for c in contexts],
+                contexts=contexts, latency_s=time.time() - t0,
+            )
+        except Exception as e:  # noqa: BLE001 - eval harness: capture, don't crash the run
+            return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))
+
+
 # Registry so evaluate.py --pipeline <name> can pick one.
-PIPELINES = {"baseline": BaselinePipeline, "hybrid": HybridPipeline}
+PIPELINES = {
+    "baseline": BaselinePipeline,
+    "hybrid": HybridPipeline,
+    "nlu_hybrid": NluHybridPipeline,
+}
