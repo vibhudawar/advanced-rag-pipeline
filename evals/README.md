@@ -22,11 +22,30 @@ model never grades its own output.
 |---|---|---|---|
 | WIN 1 — vector-only (`text-embedding-3-small`) | 0.9033 | 0.7588 | 0.7912 |
 | **WIN 2 — hybrid (BM25 + vector, RRF k=60)** | **0.9200** | **0.7700** | **0.8005** |
+| WIN 3 — NLU query rewriting + hybrid | 0.9167 | 0.7276 | 0.7649 |
 
-Hybrid improves every retrieval metric with no regression — the expected result on a
+WIN 2 improves every retrieval metric with no regression — the expected result on a
 lexically-precise corpus, where BM25 recovers exact-term matches (entities, rare terms)
-that dense vectors smooth over. Reproduce with
-`python -m evals.evaluate --index beir-scifact --golden data/beir_scifact.jsonl --pipeline hybrid --retrieval-only`.
+that dense vectors smooth over.
+
+**WIN 3 is a documented negative result.** Adding an NLU query-rewriting step *regressed*
+retrieval on this benchmark (MRR/nDCG down), across two designs (replace-query and
+additive). Cause: BEIR queries are already well-formed, so LLM rewriting/expansion dilutes
+precision — extra keyword queries spread RRF mass onto marginally-relevant docs. So the
+retrieval default stays **hybrid**; NLU is kept non-default (`--pipeline nlu_hybrid`) for
+reproducibility, and the CI gate correctly rejects it. NLU's value is on a different axis —
+see routing below.
+
+## Results — NLU intent routing (`python -m evals.routing`)
+
+| Metric | Score |
+|---|---|
+| intent routing accuracy (greeting / off_topic / rag_query, 23 labelled) | **100%** (up from 82.6% after defining the intents in the prompt) |
+
+This is the axis BEIR cannot test: NLU correctly routes greetings and support/transactional
+requests *away* from document search (avoiding wasted, mis-cited retrieval) and sends real
+questions to RAG. That — plus conversational restatement and metadata filtering — is where
+NLU earns its place, not raw retrieval on clean queries.
 
 ## Prerequisites
 
