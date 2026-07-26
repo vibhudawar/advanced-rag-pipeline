@@ -90,12 +90,25 @@ class ConversationStore:
     def save_document(self, filename: str, file_type: str | None, file_size: int | None,
                       num_chunks: int | None, pinecone_index: str | None, status: str,
                       ingestion_time_s: float | None = None, error: str | None = None,
-                      user_id: str | None = None) -> None:
-        self.client.table("documents").insert({
+                      user_id: str | None = None) -> dict | None:
+        res = self.client.table("documents").insert({
             "filename": filename, "file_type": file_type, "file_size": file_size,
             "num_chunks": num_chunks, "pinecone_index": pinecone_index, "status": status,
             "ingestion_time_s": ingestion_time_s, "error": error, "user_id": user_id,
         }).execute()
+        return res.data[0] if res.data else None
+
+    def list_documents(self, user_id: str, limit: int = 100) -> list[dict]:
+        """The current user's ingested documents, newest first (the Ingest tab table)."""
+        res = (
+            self.client.table("documents")
+            .select("id,filename,file_type,file_size,num_chunks,status,ingestion_time_s,error,created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data
 
 
 def get_store() -> ConversationStore | None:
