@@ -26,7 +26,7 @@ from pathlib import Path
 from langchain_core.documents import Document
 
 from config import EMBEDDING_PROVIDER, LLM_PROVIDER
-from src.generation.grounded import generate_grounded, stream_grounded
+from src.generation.grounded import generate_grounded, is_abstention, stream_grounded
 from src.generation.llm_generator import get_llm_generator
 from src.ingestion.DBIngestion import get_vector_store
 from src.ingestion.EmbeddingCreator import get_embedder
@@ -129,20 +129,30 @@ class RagPipeline:
         t0 = time.time()
         fused, gated = self._retrieve_gated(query)
         ans = generate_grounded(self.generator.llm, query, gated, history)
+        abstained = is_abstention(ans)
+        # No answer → no citations. A source under "I don't know" is contradictory (the gate can
+        # pass a topically-adjacent chunk the generator then judges insufficient).
+        citations = [] if abstained else [_citation(d, i + 1) for i, d in enumerate(gated)]
         return AnswerResult(
             answer=ans,
-            citations=[_citation(d, i + 1) for i, d in enumerate(gated)],
+            citations=citations,
             contexts=[d.page_content for d in gated],
             candidate_hashes=fused,
             latency_s=time.time() - t0,
-            metadata={"model": getattr(self.generator, "model_name", None), "n_context": len(gated)},
+            metadata={"model": getattr(self.generator, "model_name", None),
+                      "n_context": len(gated), "abstained": abstained},
         )
 
     def stream(self, query: str, history: History | None = None) -> Iterator[dict]:
         """Yield events: {'type': 'token'|'citations'|'done', 'data': ...}."""
         _, gated = self._retrieve_gated(query)
-        citations = [_citation(d, i + 1) for i, d in enumerate(gated)]
+        parts: list[str] = []
         for token in stream_grounded(self.generator.llm, query, gated, history):
+            parts.append(token)
             yield {"type": "token", "data": token}
+        # Suppress citations when the model abstained — otherwise a source shows under "I don't
+        # have enough information", which is misleading.
+        answer = "".join(parts)
+        citations = [] if is_abstention(answer) else [_citation(d, i + 1) for i, d in enumerate(gated)]
         yield {"type": "citations", "data": citations}
         yield {"type": "done", "data": None}
