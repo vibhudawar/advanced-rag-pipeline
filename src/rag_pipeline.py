@@ -54,25 +54,43 @@ class AnswerResult:
 _CORPUS_CACHE_DIR = Path("data/bm25_cache")
 
 
-def _load_corpus(vector_store, index_name: str, embedder, text_key: str = "text",
-                 max_docs: int = 10000) -> list[str]:
-    """Return all chunk texts for the BM25 corpus, cached to disk after the first build.
+def corpus_cache_path(index_name: str) -> Path:
+    """Disk cache for the BM25 corpus (v2 carries metadata for filtering)."""
+    return _CORPUS_CACHE_DIR / f"{index_name}.v2.json"
 
-    Uses ONE large `query` (top_k=max_docs) instead of paginated list()+fetch(), which is
-    ~11x faster (25s vs 290s on 2000 docs). For corpora larger than max_docs this returns
-    only the top_k nearest to a constant probe vector — at that scale move lexical search
-    into the search engine (see src/retrieval/hybrid.py). Cached so only the first boot pays.
+
+def _load_corpus(vector_store, index_name: str, embedder, text_key: str = "text",
+                 max_docs: int = 10000) -> list[dict]:
+    """Return the BM25 corpus as [{text, user_id, filename, source}], cached to disk after the
+    first build. Metadata rides along so the lexical (BM25) half can be filtered per user/
+    document, matching what the vector half filters server-side in Pinecone.
+
+    Uses ONE large `query` (top_k=max_docs) instead of paginated list()+fetch() (~11x faster).
+    For corpora larger than max_docs this returns only the top_k nearest to a constant probe
+    vector — at that scale move lexical search into the engine (see src/retrieval/hybrid.py).
     """
-    cache = _CORPUS_CACHE_DIR / f"{index_name}.json"
+    cache = corpus_cache_path(index_name)
     if cache.exists():
         return json.loads(cache.read_text())
     dim = embedder.get_embedding_dimension()
     index = vector_store.pc.Index(index_name)
     res = index.query(vector=[0.1] * dim, top_k=max_docs, include_metadata=True)
-    texts = [m.metadata.get(text_key) for m in res.matches if m.metadata and m.metadata.get(text_key)]
+    rows: list[dict] = []
+    for m in res.matches:
+        md = m.metadata or {}
+        text = md.get(text_key)
+        if not text:
+            continue
+        rows.append({"text": text, "user_id": md.get("user_id"),
+                     "filename": md.get("filename"), "source": md.get("source")})
     cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps(texts))
-    return texts
+    cache.write_text(json.dumps(rows))
+    return rows
+
+
+def _meta_matches(meta: dict, filter_dict: dict) -> bool:
+    """True if `meta` equals every key/value in `filter_dict` (AND semantics)."""
+    return all(meta.get(k) == v for k, v in filter_dict.items())
 
 
 def _citation(doc: Document, n: int) -> dict:
@@ -99,15 +117,24 @@ class RagPipeline:
         self.gate = SnippetGate() if use_gate else None
         if index_name not in self.vector_store.list_indexes():
             raise ValueError(f"Index '{index_name}' not found.")
-        texts = _load_corpus(self.vector_store, index_name, self.embedder)
+        rows = _load_corpus(self.vector_store, index_name, self.embedder)
+        texts = [r["text"] for r in rows]
         self.bm25 = BM25Index([content_hash(t) for t in texts], texts)
+        # content_hash -> {user_id, filename, source, text} so the lexical half can be filtered.
+        self.chunk_meta = {content_hash(r["text"]): r for r in rows}
 
-    def _fused(self, query: str) -> tuple[list[str], dict[str, Document]]:
+    def _fused(self, query: str, filter_dict: dict | None = None) -> tuple[list[str], dict[str, Document]]:
+        # Vector half: Pinecone filters server-side. Lexical half: filter fused BM25 hits by the
+        # metadata we cached, so both halves respect the same scope (user / document).
         vec_docs = self.vector_store.similarity_search(
             index_name=self.index_name, query=query, embedder=self.embedder, top_k=self.top_k,
+            filter_dict=filter_dict,
         )
         vec_hashes = [content_hash(d.page_content) for d in vec_docs]
         bm25_hashes = self.bm25.search(query, self.top_k)
+        if filter_dict:
+            bm25_hashes = [h for h in bm25_hashes
+                           if _meta_matches(self.chunk_meta.get(h, {}), filter_dict)]
         fused = reciprocal_rank_fusion([vec_hashes, bm25_hashes], k=self.rrf_k)
         return fused, {content_hash(d.page_content): d for d in vec_docs}
 
@@ -115,26 +142,33 @@ class RagPipeline:
         """Fused hashes, pre-rerank — used by the retrieval-only eval."""
         return self._fused(query)[0]
 
-    def _retrieve_gated(self, query: str) -> tuple[list[str], list[Document]]:
-        fused, by_hash = self._fused(query)
+    def _retrieve_gated(self, query: str,
+                        filter_dict: dict | None = None) -> tuple[list[str], list[Document]]:
+        fused, by_hash = self._fused(query, filter_dict)
         docs: list[Document] = []
         for h in fused[:self.top_k]:
             if h in by_hash:
                 docs.append(by_hash[h])
             elif h in self.bm25.texts_by_key:
-                docs.append(Document(page_content=self.bm25.texts_by_key[h]))
+                meta = self.chunk_meta.get(h, {})
+                docs.append(Document(
+                    page_content=self.bm25.texts_by_key[h],
+                    metadata={k: meta[k] for k in ("filename", "source", "user_id")
+                              if meta.get(k)},
+                ))
         reranked = self.reranker.rerank(query=query, documents=docs,
                                         top_k=self.rerank_top_k) if docs else []
         gated = self.gate.filter(query, reranked) if self.gate else reranked
         return fused, gated
 
     @traceable(name="rag_answer", run_type="chain")
-    def answer(self, query: str, history: History | None = None) -> AnswerResult:
+    def answer(self, query: str, history: History | None = None,
+               filter_dict: dict | None = None) -> AnswerResult:
         t0 = time.time()
         # get_usage_metadata_callback aggregates token usage across every LLM call in the run
         # (snippet gate + generation) via a contextvar — no need to thread callbacks through.
         with get_usage_metadata_callback() as cb:
-            fused, gated = self._retrieve_gated(query)
+            fused, gated = self._retrieve_gated(query, filter_dict)
             ans = generate_grounded(self.generator.llm, query, gated, history)
             usage = summarize_usage(cb.usage_metadata)
         abstained = is_abstention(ans)
@@ -152,12 +186,13 @@ class RagPipeline:
         )
 
     @traceable(name="rag_answer_stream", run_type="chain")
-    def stream(self, query: str, history: History | None = None) -> Iterator[dict]:
+    def stream(self, query: str, history: History | None = None,
+               filter_dict: dict | None = None) -> Iterator[dict]:
         """Yield events: {'type': 'token'|'citations'|'meta'|'done', 'data': ...}."""
         t0 = time.time()
         parts: list[str] = []
         with get_usage_metadata_callback() as cb:
-            _, gated = self._retrieve_gated(query)
+            _, gated = self._retrieve_gated(query, filter_dict)
             for token in stream_grounded(self.generator.llm, query, gated, history):
                 parts.append(token)
                 yield {"type": "token", "data": token}
