@@ -23,9 +23,12 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.documents import Document
+from langsmith import traceable
 
 from config import EMBEDDING_PROVIDER, LLM_PROVIDER
+from src.observability import summarize_usage
 from src.generation.grounded import generate_grounded, is_abstention, stream_grounded
 from src.generation.llm_generator import get_llm_generator
 from src.ingestion.DBIngestion import get_vector_store
@@ -125,10 +128,15 @@ class RagPipeline:
         gated = self.gate.filter(query, reranked) if self.gate else reranked
         return fused, gated
 
+    @traceable(name="rag_answer", run_type="chain")
     def answer(self, query: str, history: History | None = None) -> AnswerResult:
         t0 = time.time()
-        fused, gated = self._retrieve_gated(query)
-        ans = generate_grounded(self.generator.llm, query, gated, history)
+        # get_usage_metadata_callback aggregates token usage across every LLM call in the run
+        # (snippet gate + generation) via a contextvar — no need to thread callbacks through.
+        with get_usage_metadata_callback() as cb:
+            fused, gated = self._retrieve_gated(query)
+            ans = generate_grounded(self.generator.llm, query, gated, history)
+            usage = summarize_usage(cb.usage_metadata)
         abstained = is_abstention(ans)
         # No answer → no citations. A source under "I don't know" is contradictory (the gate can
         # pass a topically-adjacent chunk the generator then judges insufficient).
@@ -140,19 +148,30 @@ class RagPipeline:
             candidate_hashes=fused,
             latency_s=time.time() - t0,
             metadata={"model": getattr(self.generator, "model_name", None),
-                      "n_context": len(gated), "abstained": abstained},
+                      "n_context": len(gated), "abstained": abstained, **usage},
         )
 
+    @traceable(name="rag_answer_stream", run_type="chain")
     def stream(self, query: str, history: History | None = None) -> Iterator[dict]:
-        """Yield events: {'type': 'token'|'citations'|'done', 'data': ...}."""
-        _, gated = self._retrieve_gated(query)
+        """Yield events: {'type': 'token'|'citations'|'meta'|'done', 'data': ...}."""
+        t0 = time.time()
         parts: list[str] = []
-        for token in stream_grounded(self.generator.llm, query, gated, history):
-            parts.append(token)
-            yield {"type": "token", "data": token}
+        with get_usage_metadata_callback() as cb:
+            _, gated = self._retrieve_gated(query)
+            for token in stream_grounded(self.generator.llm, query, gated, history):
+                parts.append(token)
+                yield {"type": "token", "data": token}
+            usage = summarize_usage(cb.usage_metadata)
         # Suppress citations when the model abstained — otherwise a source shows under "I don't
         # have enough information", which is misleading.
         answer = "".join(parts)
-        citations = [] if is_abstention(answer) else [_citation(d, i + 1) for i, d in enumerate(gated)]
+        abstained = is_abstention(answer)
+        citations = [] if abstained else [_citation(d, i + 1) for i, d in enumerate(gated)]
         yield {"type": "citations", "data": citations}
+        yield {"type": "meta", "data": {
+            "latency_ms": round((time.time() - t0) * 1000),
+            "num_sources": len(citations),
+            "abstained": abstained,
+            **usage,
+        }}
         yield {"type": "done", "data": None}

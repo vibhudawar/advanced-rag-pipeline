@@ -14,10 +14,22 @@ export type Citation = {
   score?: number | null
 }
 
+export type AnswerMeta = {
+  latency_ms?: number
+  num_sources?: number
+  input_tokens?: number
+  output_tokens?: number
+  total_tokens?: number
+  cost_usd?: number
+  model?: string | null
+  abstained?: boolean
+}
+
 export type ChatMessage = {
   role: "user" | "assistant"
   content: string
   citations?: Citation[]
+  meta?: AnswerMeta
 }
 
 export type ConversationSummary = {
@@ -69,8 +81,14 @@ export async function getConversation(
   })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`getConversation: ${res.status}`)
-  const data = (await res.json()) as { messages: ChatMessage[] }
-  return data.messages ?? []
+  // The backend returns each message with a `metadata` jsonb; expose it as `meta` for the UI.
+  const data = (await res.json()) as {
+    messages: (ChatMessage & { metadata?: AnswerMeta | null })[]
+  }
+  return (data.messages ?? []).map(({ metadata, ...m }) => ({
+    ...m,
+    meta: metadata ?? undefined,
+  }))
 }
 
 /** Rename a conversation the user owns. */
@@ -135,6 +153,7 @@ export type StreamCallbacks = {
   onConversation?: (conversationId: string) => void
   onToken?: (token: string) => void
   onCitations?: (citations: Citation[]) => void
+  onMeta?: (meta: AnswerMeta) => void
   onDone?: () => void
   onError?: (message: string) => void
 }
@@ -190,6 +209,9 @@ export async function streamChat(
         break
       case "citations":
         cb.onCitations?.(data as Citation[])
+        break
+      case "meta":
+        cb.onMeta?.(data as AnswerMeta)
         break
       case "done":
         cb.onDone?.()
