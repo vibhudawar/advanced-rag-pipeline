@@ -17,12 +17,14 @@ import time
 from langchain_core.documents import Document
 
 from config import EMBEDDING_PROVIDER, LLM_PROVIDER
+from src.generation.grounded import generate_grounded
 from src.generation.llm_generator import expand_query, get_llm_generator
 from src.ingestion.DBIngestion import get_vector_store
 from src.ingestion.EmbeddingCreator import get_embedder
 from src.reranking.reranker import get_reranker
 from src.retrieval.hybrid import BM25Index, reciprocal_rank_fusion
 from src.retrieval.nlu import QueryUnderstander
+from src.retrieval.snippet_gate import SnippetGate
 
 from .schema import RunResult, content_hash
 
@@ -254,9 +256,66 @@ class NluHybridPipeline(HybridPipeline):
             return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))
 
 
+class SnippetGatePipeline(HybridPipeline):
+    """WIN 4: hybrid retrieval -> rerank -> LLM snippet gate -> grounded, cited generation.
+
+    Adds two things on top of hybrid: (1) a relevance gate that drops reranked snippets that
+    don't actually help answer the question, and (2) grounded generation that cites sources and
+    abstains when the gated context is empty. Targets abstention accuracy + faithfulness; the
+    retrieval set (and retrieval_only behaviour) is identical to hybrid.
+    """
+
+    label = "snippet_gate"
+
+    def __init__(self, index_name: str, top_k: int = 10, rerank_top_k: int = 5,
+                 retrieval_only: bool = False, rrf_k: int = 60, gate_model: str | None = None):
+        super().__init__(index_name, top_k=top_k, rerank_top_k=rerank_top_k,
+                         retrieval_only=retrieval_only, rrf_k=rrf_k)
+        self.gate = SnippetGate(model=gate_model)
+
+    def run(self, query: str) -> RunResult:
+        t0 = time.time()
+        try:
+            # --- hybrid retrieval (same as HybridPipeline) ---
+            vec_docs = self.vector_store.similarity_search(
+                index_name=self.index_name, query=query,
+                embedder=self.embedder, top_k=self.top_k,
+            )
+            vec_hashes = [content_hash(d.page_content) for d in vec_docs]
+            bm25_hashes = self.bm25.search(query, self.top_k)
+            fused = reciprocal_rank_fusion([vec_hashes, bm25_hashes], k=self.rrf_k)
+
+            if self.retrieval_only:
+                return RunResult(query=query, answer="", candidate_hashes=fused,
+                                 latency_s=time.time() - t0)
+
+            by_hash = {content_hash(d.page_content): d for d in vec_docs}
+            docs = []
+            for h in fused[:self.top_k]:
+                if h in by_hash:
+                    docs.append(by_hash[h])
+                elif h in self.bm25.texts_by_key:
+                    docs.append(Document(page_content=self.bm25.texts_by_key[h]))
+            reranked = self.reranker.rerank(query=query, documents=docs,
+                                            top_k=self.rerank_top_k) if docs else []
+
+            # --- WIN 4: gate out irrelevant snippets, then generate grounded/cited or abstain ---
+            gated = self.gate.filter(query, reranked)
+            answer = generate_grounded(self.generator.llm, query, gated)
+            contexts = [d.page_content for d in gated]
+            return RunResult(
+                query=query, answer=answer, candidate_hashes=fused,
+                retrieved_hashes=[content_hash(c) for c in contexts],
+                contexts=contexts, latency_s=time.time() - t0,
+            )
+        except Exception as e:  # noqa: BLE001 - eval harness: capture, don't crash the run
+            return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))
+
+
 # Registry so evaluate.py --pipeline <name> can pick one.
 PIPELINES = {
     "baseline": BaselinePipeline,
     "hybrid": HybridPipeline,
     "nlu_hybrid": NluHybridPipeline,
+    "snippet_gate": SnippetGatePipeline,
 }
