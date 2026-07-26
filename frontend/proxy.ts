@@ -1,9 +1,10 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
-// Refreshes the Supabase session cookie and gates the app: unauthenticated users are sent to
-// /login; authenticated users are kept out of /login.
-export async function middleware(request: NextRequest) {
+// Next 16 renamed the "middleware" convention to "proxy". Refreshes the Supabase session
+// cookie and gates the app: unauthenticated users go to /login; authenticated users are kept
+// out of /login.
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
