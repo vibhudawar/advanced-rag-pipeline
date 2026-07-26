@@ -21,6 +21,7 @@ from src.generation.grounded import generate_grounded
 from src.generation.llm_generator import expand_query, get_llm_generator
 from src.ingestion.DBIngestion import get_vector_store
 from src.ingestion.EmbeddingCreator import get_embedder
+from src.rag_pipeline import RagPipeline
 from src.reranking.reranker import get_reranker
 from src.retrieval.hybrid import BM25Index, reciprocal_rank_fusion
 from src.retrieval.nlu import QueryUnderstander
@@ -312,10 +313,41 @@ class SnippetGatePipeline(HybridPipeline):
             return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))
 
 
+class ProductionPipeline:
+    """Thin wrapper over the canonical src.rag_pipeline.RagPipeline (what the API serves).
+
+    Registering this makes the eval harness score the SHIPPING pipeline directly, rather than
+    a parallel re-implementation. It should track `snippet_gate` closely (same steps); any gap
+    is a consolidation bug worth catching.
+    """
+
+    label = "production"
+
+    def __init__(self, index_name: str, retrieval_only: bool = False):
+        self.retrieval_only = retrieval_only
+        self.pipe = RagPipeline(index_name)
+
+    def run(self, query: str) -> RunResult:
+        t0 = time.time()
+        try:
+            if self.retrieval_only:
+                return RunResult(query=query, answer="", candidate_hashes=self.pipe.candidates(query),
+                                 latency_s=time.time() - t0)
+            r = self.pipe.answer(query)
+            return RunResult(
+                query=query, answer=r.answer, candidate_hashes=r.candidate_hashes,
+                retrieved_hashes=[content_hash(c) for c in r.contexts],
+                contexts=r.contexts, latency_s=time.time() - t0,
+            )
+        except Exception as e:  # noqa: BLE001 - eval harness: capture, don't crash the run
+            return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))
+
+
 # Registry so evaluate.py --pipeline <name> can pick one.
 PIPELINES = {
     "baseline": BaselinePipeline,
     "hybrid": HybridPipeline,
     "nlu_hybrid": NluHybridPipeline,
     "snippet_gate": SnippetGatePipeline,
+    "production": ProductionPipeline,
 }

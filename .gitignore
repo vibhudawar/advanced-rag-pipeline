@@ -175,6 +175,7 @@ langchain.db
 evals/reports/
 data/beir/
 data/golden.jsonl
+data/bm25_cache/
 
 # ============================================================================
 # Project-Specific (Optional - Uncomment if needed)
