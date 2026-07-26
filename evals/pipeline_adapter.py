@@ -1,9 +1,9 @@
 """Adapters that expose a RAG pipeline as `run(query) -> RunResult` for evaluation.
 
-`BaselinePipeline` replicates the current production path (expand -> retrieve -> dedupe
--> rerank -> generate) from src/main_app.py, but statelessly (no conversation memory,
-one fresh run per query) and with the intermediate chunk sets surfaced so we can score
-retrieval separately from generation.
+`BaselinePipeline` replicates the original vanilla path (expand -> retrieve -> dedupe
+-> rerank -> generate) statelessly (no conversation memory, one fresh run per query) and
+with the intermediate chunk sets surfaced so we can score retrieval separately from
+generation. The shipped pipeline is `src/rag_pipeline.py` (wrapped as `--pipeline production`).
 
 Later wins (hybrid+RRF, NLU, snippet gate, ...) each add a new subclass here. Because
 they share the RunResult contract, evals/evaluate.py can score any of them unchanged —

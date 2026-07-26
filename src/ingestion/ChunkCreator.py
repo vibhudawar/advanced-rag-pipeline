@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_experimental.text_splitter import SemanticChunker
 
 from src.utils.AgenticChunkerHelper import (
     PropositionExtractor,
@@ -65,6 +64,10 @@ class SemanticChunkerFunction(Chunker):
         Args:
             embedder: Embedder instance (from src.ingestion.EmbeddingCreator)
         """
+        # Lazy import: semantic chunking is optional and pulls in langchain-experimental, which
+        # isn't a runtime dependency for the default (recursive) chunker.
+        from langchain_experimental.text_splitter import SemanticChunker
+
         self.embedder = embedder
         self.splitter = SemanticChunker(embeddings=embedder, breakpoint_threshold_type="percentile")
 
