@@ -35,7 +35,7 @@ export function Composer({
   }
 
   return (
-    <div className="border-t bg-background p-3">
+    <div className="bg-background p-3">
       <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
         <textarea
           ref={ref}
@@ -55,7 +55,12 @@ export function Composer({
           className="max-h-[200px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
         />
         {streaming ? (
-          <Button size="icon" variant="secondary" onClick={onStop} aria-label="Stop">
+          <Button
+            size="icon"
+            variant="secondary"
+            onClick={onStop}
+            aria-label="Stop"
+          >
             <Square className="size-4" />
           </Button>
         ) : (
