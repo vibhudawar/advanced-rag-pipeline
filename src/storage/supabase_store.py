@@ -64,6 +64,28 @@ class ConversationStore:
         )
         return res.data
 
+    def rename_conversation(self, conversation_id: str, user_id: str, title: str) -> bool:
+        """Rename a thread the user owns. Returns False if it isn't theirs / doesn't exist."""
+        res = (
+            self.client.table("conversations")
+            .update({"title": title[:120]})
+            .eq("id", conversation_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(res.data)
+
+    def delete_conversation(self, conversation_id: str, user_id: str) -> bool:
+        """Delete a thread the user owns (messages cascade via FK). False if not theirs."""
+        res = (
+            self.client.table("conversations")
+            .delete()
+            .eq("id", conversation_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(res.data)
+
     def get_messages(self, conversation_id: str, user_id: str) -> list[dict] | None:
         """Full turns for a thread the user owns, oldest-first. None if not owned/missing."""
         if not self.owns_conversation(conversation_id, user_id):

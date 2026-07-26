@@ -45,7 +45,7 @@ app = FastAPI(title="RAG API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -80,6 +80,10 @@ async def security_headers(request, call_next):
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
+
+
+class RenameRequest(BaseModel):
+    title: str
 
 
 class StreamRequest(BaseModel):
@@ -133,6 +137,39 @@ def get_conversation(conversation_id: str, user: CurrentUser):
     if messages is None:
         raise HTTPException(status_code=404, detail="not found")
     return {"conversation_id": conversation_id, "messages": messages}
+
+
+@app.patch("/conversations/{conversation_id}")
+def rename_conversation(conversation_id: str, req: RenameRequest, user: CurrentUser):
+    """Rename a thread the user owns. 404 if missing/not theirs."""
+    store = get_store()
+    assert store is not None
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty.")
+    try:
+        ok = store.rename_conversation(conversation_id, user.id, title)
+    except Exception:
+        logger.exception("rename_conversation failed")
+        raise HTTPException(status_code=500, detail="internal error")
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"id": conversation_id, "title": title[:120]}
+
+
+@app.delete("/conversations/{conversation_id}")
+def delete_conversation(conversation_id: str, user: CurrentUser):
+    """Delete a thread the user owns (messages cascade). 404 if missing/not theirs."""
+    store = get_store()
+    assert store is not None
+    try:
+        ok = store.delete_conversation(conversation_id, user.id)
+    except Exception:
+        logger.exception("delete_conversation failed")
+        raise HTTPException(status_code=500, detail="internal error")
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
 
 
 @app.post("/stream")
