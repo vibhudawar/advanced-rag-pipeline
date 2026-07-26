@@ -16,13 +16,16 @@ import { MessageBubble } from "./message-bubble"
 export function ChatView({
   conversationId,
   initialMessages,
+  documents,
 }: {
   conversationId?: string
   initialMessages: ChatMessage[]
+  documents: string[]
 }) {
   const router = useRouter()
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [streaming, setStreaming] = useState(false)
+  const [scopeDoc, setScopeDoc] = useState("") // "" = search all my documents
   const convIdRef = useRef<string | undefined>(conversationId)
   const wasNew = useRef(conversationId === undefined)
   const abortRef = useRef<AbortController | null>(null)
@@ -79,7 +82,13 @@ export function ChatView({
         })
 
       await streamChat(
-        { question, conversationId: convIdRef.current, token, signal: controller.signal },
+        {
+          question,
+          conversationId: convIdRef.current,
+          document: scopeDoc || undefined,
+          token,
+          signal: controller.signal,
+        },
         {
           onConversation: (id) => {
             convIdRef.current = id
@@ -115,7 +124,7 @@ export function ChatView({
         router.refresh()
       }
     },
-    [router],
+    [router, scopeDoc],
   )
 
   const stop = useCallback(() => {
@@ -127,6 +136,26 @@ export function ChatView({
 
   return (
     <div className="flex h-full flex-col">
+      {documents.length > 0 && (
+        <div className="flex items-center justify-end gap-2 border-b px-4 py-2">
+          <label htmlFor="scope" className="text-xs text-muted-foreground">
+            Search
+          </label>
+          <select
+            id="scope"
+            value={scopeDoc}
+            onChange={(e) => setScopeDoc(e.target.value)}
+            className="max-w-[16rem] truncate rounded-md border bg-background px-2 py-1 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="">All my documents</option>
+            {documents.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {empty ? (
         <div className="flex flex-1 items-center justify-center p-6">
           <div className="max-w-md text-center">
