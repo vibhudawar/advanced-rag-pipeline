@@ -1,0 +1,6 @@
+# Optional: local cross-encoder reranker fallback (CrossEncoderReranker).
+# Pulls sentence-transformers + torch (~2GB). Only needed if you want reranking to work
+# without Cohere. The default pipeline uses the Cohere reranker, so most deployments should
+# NOT install this.
+#   pip install -r requirements-optional.txt
+sentence-transformers==4.1.0
