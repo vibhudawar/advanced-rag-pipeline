@@ -14,16 +14,21 @@ from __future__ import annotations
 import json
 import logging
 import os
+from typing import Annotated
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from api.auth import AuthUser, get_current_user
 from src.rag_pipeline import RagPipeline
 from src.storage.supabase_store import get_store
 
 logger = logging.getLogger("rag.api")
+
+# The authenticated caller, resolved from the validated Supabase bearer token.
+CurrentUser = Annotated[AuthUser, Depends(get_current_user)]
 
 RAG_INDEX = os.getenv("RAG_INDEX", "beir-scifact")
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
@@ -81,26 +86,53 @@ def _sse(event: str, data) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+@app.get("/conversations")
+def list_conversations(user: CurrentUser):
+    """The signed-in user's chat threads (the sidebar), newest-activity first."""
+    store = get_store()
+    assert store is not None  # get_current_user 503s if Supabase isn't configured
+    try:
+        return {"conversations": store.list_conversations(user.id)}
+    except Exception:
+        logger.exception("list_conversations failed")
+        raise HTTPException(status_code=500, detail="internal error")
+
+
+@app.get("/conversations/{conversation_id}")
+def get_conversation(conversation_id: str, user: CurrentUser):
+    """Full message history for a thread the user owns. 404 if missing or not theirs
+    (same status for both, so ownership can't be probed)."""
+    store = get_store()
+    assert store is not None
+    try:
+        messages = store.get_messages(conversation_id, user.id)
+    except Exception:
+        logger.exception("get_conversation failed")
+        raise HTTPException(status_code=500, detail="internal error")
+    if messages is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"conversation_id": conversation_id, "messages": messages}
+
+
 @app.post("/stream")
-def stream(req: StreamRequest):
+def stream(req: StreamRequest, user: CurrentUser):
     pipeline = get_pipeline()
     store = get_store()
+    assert store is not None  # get_current_user 503s if Supabase isn't configured
 
-    # Resolve conversation + history. With persistence: load history from the DB (source of
-    # truth). Without: fall back to client-supplied history and no conversation id.
+    # Resolve conversation + history from the DB (source of truth), scoped to the verified user.
+    # Continuing an existing thread requires owning it; a new thread is created for this user.
     conversation_id = req.conversation_id
-    if store is not None:
-        try:
-            if conversation_id is None:
-                conversation_id = store.create_conversation(title=req.question)
-            history = store.get_history(conversation_id)
-            store.add_message(conversation_id, "user", req.question)
-        except Exception:
-            logger.exception("persistence (load/user-message) failed; continuing without it")
-            history = []
-    else:
-        history = [(m["role"], m["content"]) for m in (req.history or [])
-                   if m.get("role") and m.get("content")]
+    if conversation_id is not None and not store.owns_conversation(conversation_id, user.id):
+        raise HTTPException(status_code=404, detail="not found")
+    try:
+        if conversation_id is None:
+            conversation_id = store.create_conversation(title=req.question, user_id=user.id)
+        history = store.get_history(conversation_id)
+        store.add_message(conversation_id, "user", req.question)
+    except Exception:
+        logger.exception("persistence (load/user-message) failed; continuing without it")
+        history = []
 
     def event_stream():
         answer_parts: list[str] = []
