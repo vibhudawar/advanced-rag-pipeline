@@ -1,12 +1,30 @@
-export default function ChatPage() {
-  return (
-    <div className="flex h-full items-center justify-center p-6">
-      <div className="max-w-md text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">What do you want to know?</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Grounded answers with citations. The streaming chat arrives in 7c.2.
-        </p>
-      </div>
-    </div>
-  )
+import { ChatView } from "@/components/chat/chat-view"
+import { getConversation, type ChatMessage } from "@/lib/api"
+import { createClient } from "@/lib/supabase/server"
+
+// Chat tab. Server-loads the selected thread's history (from `?c=<id>`) and hands it to the
+// client ChatView. Keyed by conversation id so switching threads mounts fresh state.
+export default async function ChatPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string }>
+}) {
+  const { c } = await searchParams
+  let initialMessages: ChatMessage[] = []
+
+  if (c) {
+    const supabase = await createClient()
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    if (token) {
+      try {
+        const msgs = await getConversation(c, token)
+        if (msgs) initialMessages = msgs
+      } catch {
+        // Backend unreachable — render an empty thread; the client surfaces errors on send.
+      }
+    }
+  }
+
+  return <ChatView key={c ?? "new"} conversationId={c} initialMessages={initialMessages} />
 }
