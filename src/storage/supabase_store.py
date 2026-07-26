@@ -92,7 +92,7 @@ class ConversationStore:
             return None
         res = (
             self.client.table("messages")
-            .select("role,content,citations,created_at")
+            .select("role,content,citations,metadata,created_at")
             .eq("conversation_id", conversation_id)
             .order("created_at")
             .execute()

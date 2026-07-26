@@ -52,3 +52,10 @@ SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY")
 # not at runtime — the app talks to Supabase over PostgREST via supabase-py.
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_POOLED_URL = os.getenv("DATABASE_POOLED_URL")
+
+# Observability (WIN 8). LangChain/LangSmith read these from the environment directly; set
+# LANGCHAIN_TRACING_V2=true + LANGSMITH_API_KEY to turn tracing on. We default the project name
+# so traces land somewhere sensible when tracing is enabled. Absent the key, tracing is off and
+# @traceable is a near-no-op.
+if os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true":
+    os.environ.setdefault("LANGCHAIN_PROJECT", "rag-production")

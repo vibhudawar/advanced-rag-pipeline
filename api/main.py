@@ -195,6 +195,7 @@ def stream(req: StreamRequest, user: CurrentUser):
     def event_stream():
         answer_parts: list[str] = []
         citations: list[dict] = []
+        meta: dict = {}
         try:
             if conversation_id:
                 yield _sse("conversation", {"conversation_id": conversation_id})
@@ -203,11 +204,15 @@ def stream(req: StreamRequest, user: CurrentUser):
                     answer_parts.append(event["data"])
                 elif event["type"] == "citations":
                     citations = event["data"]
+                elif event["type"] == "meta":
+                    meta = event["data"]
                 yield _sse(event["type"], event["data"])
             if store is not None and conversation_id:
                 try:
+                    # Persist run metrics alongside the message so the UI can show them on reload.
                     store.add_message(conversation_id, "assistant", "".join(answer_parts),
-                                      citations=citations, metadata={"pipeline": "production"})
+                                      citations=citations,
+                                      metadata={"pipeline": "production", **meta})
                 except Exception:
                     logger.exception("persistence (assistant-message) failed")
         except Exception:
