@@ -26,6 +26,18 @@ export type ConversationSummary = {
   updated_at: string
 }
 
+export type DocumentRow = {
+  id: string
+  filename: string
+  file_type: string | null
+  file_size: number | null
+  num_chunks: number | null
+  status: "pending" | "success" | "failed"
+  ingestion_time_s: number | null
+  error: string | null
+  created_at: string
+}
+
 function baseUrl(): string {
   if (!API_URL) throw new Error("NEXT_PUBLIC_API_URL is not set")
   return API_URL.replace(/\/$/, "")
@@ -59,6 +71,45 @@ export async function getConversation(
   if (!res.ok) throw new Error(`getConversation: ${res.status}`)
   const data = (await res.json()) as { messages: ChatMessage[] }
   return data.messages ?? []
+}
+
+/** Server-side read: the current user's ingested documents (Ingest tab table). */
+export async function listDocuments(token: string): Promise<DocumentRow[]> {
+  const res = await fetch(`${baseUrl()}/documents`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  })
+  if (!res.ok) throw new Error(`listDocuments: ${res.status}`)
+  const data = (await res.json()) as { documents: DocumentRow[] }
+  return data.documents ?? []
+}
+
+/**
+ * Client-side upload: POST one file to /ingest as multipart. Returns the saved document row.
+ * Surfaces the backend's error detail (e.g. unsupported type, too large) so the UI can toast it.
+ */
+export async function ingestDocument(
+  file: File,
+  token: string,
+): Promise<{ document: DocumentRow | null; num_chunks: number }> {
+  const form = new FormData()
+  form.append("file", file)
+  const res = await fetch(`${baseUrl()}/ingest`, {
+    method: "POST",
+    headers: authHeaders(token), // no Content-Type — the browser sets the multipart boundary
+    body: form,
+  })
+  if (!res.ok) {
+    let detail = `Upload failed (${res.status})`
+    try {
+      const body = (await res.json()) as { detail?: string }
+      if (body.detail) detail = body.detail
+    } catch {
+      // non-JSON error body — keep the generic message
+    }
+    throw new Error(detail)
+  }
+  return (await res.json()) as { document: DocumentRow | null; num_chunks: number }
 }
 
 export type StreamCallbacks = {
