@@ -28,7 +28,8 @@ class OpenAIGenerator(LLMGenerator):
         self.llm = ChatOpenAI(
             model=model,
             temperature=temperature,
-            openai_api_key=OPENAI_API_KEY
+            openai_api_key=OPENAI_API_KEY,
+            stream_usage=True,  # emit token usage on streamed calls (for observability)
         )
         self.model_name = model
         

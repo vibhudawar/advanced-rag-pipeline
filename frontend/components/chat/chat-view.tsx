@@ -70,6 +70,14 @@ export function ChatView({
           return next
         })
 
+      const setMeta = (meta: ChatMessage["meta"]) =>
+        setMessages((m) => {
+          const next = [...m]
+          const last = next[next.length - 1]
+          if (last?.role === "assistant") next[next.length - 1] = { ...last, meta }
+          return next
+        })
+
       await streamChat(
         { question, conversationId: convIdRef.current, token, signal: controller.signal },
         {
@@ -78,6 +86,7 @@ export function ChatView({
           },
           onToken: appendToken,
           onCitations: setCitations,
+          onMeta: setMeta,
           onError: (msg) => {
             toast.error(msg)
             setMessages((m) => {
