@@ -26,9 +26,9 @@ jobs:
       # Linters are scoped to evals/ (new code). Retrofitting ruff/mypy onto the legacy
       # src/ tree is WIN 0 of the plan; widen this path as that cleanup lands.
       - name: Lint
-        run: ruff check evals/ src/retrieval/
-      - name: Typecheck (eval harness)
-        run: mypy evals src/retrieval --ignore-missing-imports --follow-imports=skip
+        run: ruff check evals/ src/retrieval/ src/generation/grounded.py src/rag_pipeline.py api/
+      - name: Typecheck
+        run: mypy evals src/retrieval src/generation/grounded.py src/rag_pipeline.py api --ignore-missing-imports --follow-imports=skip
       - name: Unit tests (metric math — no network/keys)
         run: pytest evals/test_metrics.py -q
 
