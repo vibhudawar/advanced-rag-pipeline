@@ -39,6 +39,44 @@ class ConversationStore:
         )
         return [(m["role"], m["content"]) for m in res.data]
 
+    def owns_conversation(self, conversation_id: str, user_id: str) -> bool:
+        """True if `conversation_id` belongs to `user_id`. Application-level isolation while
+        RLS is deferred and the backend uses the service-role key."""
+        res = (
+            self.client.table("conversations")
+            .select("id")
+            .eq("id", conversation_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        return bool(res.data)
+
+    def list_conversations(self, user_id: str, limit: int = 50) -> list[dict]:
+        """The current user's threads, newest-activity first (the sidebar)."""
+        res = (
+            self.client.table("conversations")
+            .select("id,title,created_at,updated_at")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data
+
+    def get_messages(self, conversation_id: str, user_id: str) -> list[dict] | None:
+        """Full turns for a thread the user owns, oldest-first. None if not owned/missing."""
+        if not self.owns_conversation(conversation_id, user_id):
+            return None
+        res = (
+            self.client.table("messages")
+            .select("role,content,citations,created_at")
+            .eq("conversation_id", conversation_id)
+            .order("created_at")
+            .execute()
+        )
+        return res.data
+
     def add_message(self, conversation_id: str, role: str, content: str,
                     citations: list[dict] | None = None, metadata: dict | None = None) -> None:
         self.client.table("messages").insert({
