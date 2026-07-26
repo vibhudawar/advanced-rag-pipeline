@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/sidebar"
 import type { ConversationSummary } from "@/lib/api"
 
+import { ConversationItem } from "./conversation-item"
 import { ThemeToggle } from "./theme-toggle"
 import { UserMenu } from "./user-menu"
 
@@ -100,14 +101,7 @@ export function AppSidebar({
             ) : (
               <SidebarMenu>
                 {conversations.map((c) => (
-                  <SidebarMenuItem key={c.id}>
-                    <SidebarMenuButton
-                      isActive={activeConv === c.id}
-                      render={<Link href={`/?c=${c.id}`} />}
-                    >
-                      <span className="truncate">{c.title || "New chat"}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
+                  <ConversationItem key={c.id} conversation={c} active={activeConv === c.id} />
                 ))}
               </SidebarMenu>
             )}
