@@ -73,6 +73,25 @@ export async function getConversation(
   return data.messages ?? []
 }
 
+/** Rename a conversation the user owns. */
+export async function renameConversation(id: string, title: string, token: string): Promise<void> {
+  const res = await fetch(`${baseUrl()}/conversations/${id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) throw new Error(`renameConversation: ${res.status}`)
+}
+
+/** Delete a conversation the user owns (its messages cascade). */
+export async function deleteConversation(id: string, token: string): Promise<void> {
+  const res = await fetch(`${baseUrl()}/conversations/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  })
+  if (!res.ok) throw new Error(`deleteConversation: ${res.status}`)
+}
+
 /** Server-side read: the current user's ingested documents (Ingest tab table). */
 export async function listDocuments(token: string): Promise<DocumentRow[]> {
   const res = await fetch(`${baseUrl()}/documents`, {
