@@ -79,20 +79,7 @@ create trigger trg_touch_conversation
     for each row execute function touch_conversation();
 
 -- ---------------------------------------------------------------------------
--- Row Level Security — DEFERRED until Google auth lands (WIN 7, phase 2).
--- The backend uses the service_role key (which bypasses RLS) for now. When auth is added,
--- uncomment to enforce per-user isolation:
---
--- alter table conversations enable row level security;
--- alter table messages      enable row level security;
--- alter table documents     enable row level security;
---
--- create policy "own conversations" on conversations
---     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
--- create policy "own messages" on messages
---     for all using (
---         auth.uid() = (select user_id from conversations c where c.id = conversation_id)
---     );
--- create policy "own documents" on documents
---     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+-- Row Level Security — now ENABLED in 0003_enable_rls.sql (per-user isolation).
+-- The backend uses the service_role key, which bypasses RLS, so RLS is defense-in-depth
+-- rather than the primary control (the API enforces ownership in application code).
 -- ---------------------------------------------------------------------------
