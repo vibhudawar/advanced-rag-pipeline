@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import time
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile
@@ -24,7 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from api.auth import AuthUser, get_current_user
-from src.rag_pipeline import RagPipeline
+from src.rag_pipeline import RagPipeline, corpus_cache_path
 from src.storage.supabase_store import get_store
 
 logger = logging.getLogger("rag.api")
@@ -34,6 +33,9 @@ CurrentUser = Annotated[AuthUser, Depends(get_current_user)]
 
 RAG_INDEX = os.getenv("RAG_INDEX", "beir-scifact")
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+# Scope retrieval to the requesting user's own documents (chunks carry user_id). Turn OFF only
+# when serving a shared corpus without per-user tagging, e.g. the beir-scifact benchmark.
+SCOPE_BY_USER = os.getenv("RAG_SCOPE_BY_USER", "true").lower() == "true"
 
 # Ingestion guardrails (env-overridable). Bound file size and chunk count so a single upload
 # can't run up unbounded embedding cost or memory.
@@ -67,8 +69,7 @@ def reset_pipeline() -> None:
     global _pipeline
     _pipeline = None
     try:
-        cache = Path("data/bm25_cache") / f"{RAG_INDEX}.json"
-        cache.unlink(missing_ok=True)
+        corpus_cache_path(RAG_INDEX).unlink(missing_ok=True)
     except OSError:
         logger.exception("failed clearing corpus cache")
 
@@ -89,6 +90,7 @@ class RenameRequest(BaseModel):
 class StreamRequest(BaseModel):
     question: str
     conversation_id: str | None = None       # continue an existing thread
+    document: str | None = None              # scope retrieval to one document (filename)
     history: list[dict] | None = None         # fallback if persistence is off
 
 
@@ -192,6 +194,14 @@ def stream(req: StreamRequest, user: CurrentUser):
         logger.exception("persistence (load/user-message) failed; continuing without it")
         history = []
 
+    # Scope retrieval: to the verified user's own documents, and optionally to one document.
+    # user_id/document come from the token + request, never trusted for identity beyond scoping.
+    filter_dict: dict = {}
+    if SCOPE_BY_USER:
+        filter_dict["user_id"] = user.id
+    if req.document:
+        filter_dict["filename"] = req.document
+
     def event_stream():
         answer_parts: list[str] = []
         citations: list[dict] = []
@@ -199,7 +209,7 @@ def stream(req: StreamRequest, user: CurrentUser):
         try:
             if conversation_id:
                 yield _sse("conversation", {"conversation_id": conversation_id})
-            for event in pipeline.stream(req.question, history):
+            for event in pipeline.stream(req.question, history, filter_dict=filter_dict or None):
                 if event["type"] == "token":
                     answer_parts.append(event["data"])
                 elif event["type"] == "citations":

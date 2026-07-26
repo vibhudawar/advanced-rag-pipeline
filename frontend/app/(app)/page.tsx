@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 
 import { ChatView } from "@/components/chat/chat-view"
-import { getConversation, type ChatMessage } from "@/lib/api"
+import { getConversation, listDocuments, type ChatMessage } from "@/lib/api"
 import { createClient } from "@/lib/supabase/server"
 
 // Chat tab. Server-loads the selected thread's history (from `?c=<id>`) and hands it to the
@@ -13,12 +13,22 @@ export default async function ChatPage({
 }) {
   const { c } = await searchParams
   let initialMessages: ChatMessage[] = []
+  let documents: string[] = []
 
-  if (c) {
-    const supabase = await createClient()
-    const { data } = await supabase.auth.getSession()
-    const token = data.session?.access_token
-    if (token) {
+  const supabase = await createClient()
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+
+  if (token) {
+    // Distinct filenames of successfully-ingested docs — for the "scope to a document" selector.
+    try {
+      const docs = await listDocuments(token)
+      documents = [...new Set(docs.filter((d) => d.status === "success").map((d) => d.filename))]
+    } catch {
+      // Backend unreachable — no scope options; chat still works over all docs.
+    }
+
+    if (c) {
       let msgs: ChatMessage[] | null | undefined
       try {
         msgs = await getConversation(c, token)
@@ -31,5 +41,12 @@ export default async function ChatPage({
     }
   }
 
-  return <ChatView key={c ?? "new"} conversationId={c} initialMessages={initialMessages} />
+  return (
+    <ChatView
+      key={c ?? "new"}
+      conversationId={c}
+      initialMessages={initialMessages}
+      documents={documents}
+    />
+  )
 }
