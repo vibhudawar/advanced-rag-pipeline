@@ -7,7 +7,10 @@ load_dotenv()
 
 # SERVICE SELECTION
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "openai")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto") 
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto")
+# Generation model (OpenAI). gpt-5.4-nano: lite + cost-efficient, good enough for grounded RAG
+# (retrieval + gate do the hard part). Override to gpt-5.4-mini if evals show quality slipping.
+OPENAI_GENERATION_MODEL = os.getenv("OPENAI_GENERATION_MODEL", "gpt-5.4-nano")
 
 # OpenAI specific
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

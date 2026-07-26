@@ -6,7 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from config import OPENAI_API_KEY, GEMINI_API_KEY, LLM_PROVIDER
+from config import OPENAI_API_KEY, GEMINI_API_KEY, LLM_PROVIDER, OPENAI_GENERATION_MODEL
 from src.utils.PromptsConstants import MQE_PROMPT, RAG_SYSTEM_PROMPT
 
 class LLMGenerator(ABC):
@@ -21,7 +21,8 @@ class LLMGenerator(ABC):
 class OpenAIGenerator(LLMGenerator):
     """OpenAI LLM generator using LangChain"""
     
-    def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.0):
+    def __init__(self, model: str | None = None, temperature: float = 0.0):
+        model = model or OPENAI_GENERATION_MODEL
         if not OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY not found in environment variables")
         
