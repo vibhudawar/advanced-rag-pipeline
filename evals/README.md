@@ -59,17 +59,21 @@ generation. It was produced by `generate_golden.py` over the public `beir-scifac
 (reused — no new ingestion, no PII) and shuffled (seed 42). Items are synthetic and marked
 `needs_review: true` — curate a subset before treating the numbers as authoritative.
 
-## Results — generation (gen_golden.jsonl, indicative 20-item sanity run, hybrid + judge)
+## Results — generation (gen_golden.jsonl, 75 items, judge = gpt-4o)
 
-| faithfulness | answer relevance | context relevance | abstention accuracy |
-|---|---|---|---|
-| 1.00 | 0.99 | 0.91 | **0.80** |
+| Pipeline | faithfulness | answer relevance | context relevance | abstention accuracy |
+|---|---|---|---|---|
+| hybrid (before) | 1.000 | 0.9933 | 0.9183 | 0.9067 |
+| **WIN 4 — snippet gate + grounded citations (after)** | 1.000 | 0.9850 | **0.9867** | **0.9733** |
 
-Abstention is the headroom: on unanswerable questions the current pipeline often answers
-anyway instead of declining — the weakness WIN 4 (snippet-relevance gate + grounded
-citations + disciplined "I don't know") targets. Retrieval on this set is ~1.0 (questions
-were generated from their source chunk), which is why retrieval quality is measured on BEIR,
-not here. Full generation baseline is run at the start of WIN 4.
+WIN 4 adds an LLM snippet-relevance gate after reranking (drops snippets that don't help
+answer the question) and grounded generation that cites sources and abstains when the gated
+context is empty. Effect: **context relevance +6.8%** (cleaner context reaches the LLM) and
+**abstention accuracy +6.7%** (declines correctly on unanswerable questions), with faithfulness
+held at 1.0 and answer relevance flat. Retrieval on this set is ~1.0 (questions were generated
+from their source chunk), so retrieval quality is measured on BEIR, not here. Faithfulness is
+already 1.0 on this synthetic corpus; the gate would lift it further on noisier real documents.
+Reproduce with `python -m evals.evaluate --index beir-scifact --golden data/gen_golden.jsonl --pipeline snippet_gate`.
 
 ## Prerequisites
 
