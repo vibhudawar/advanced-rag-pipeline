@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from src.rag_pipeline import RagPipeline
+from src.storage.supabase_store import get_store
 
 logger = logging.getLogger("rag.api")
 
@@ -57,7 +58,8 @@ async def security_headers(request, call_next):
 
 class StreamRequest(BaseModel):
     question: str
-    history: list[dict] | None = None  # [{"role": "...", "content": "..."}]
+    conversation_id: str | None = None       # continue an existing thread
+    history: list[dict] | None = None         # fallback if persistence is off
 
 
 @app.get("/api/healthCheck")
@@ -82,16 +84,42 @@ def _sse(event: str, data) -> str:
 @app.post("/stream")
 def stream(req: StreamRequest):
     pipeline = get_pipeline()
-    history = [
-        (m["role"], m["content"])
-        for m in (req.history or [])
-        if m.get("role") and m.get("content")
-    ]
+    store = get_store()
+
+    # Resolve conversation + history. With persistence: load history from the DB (source of
+    # truth). Without: fall back to client-supplied history and no conversation id.
+    conversation_id = req.conversation_id
+    if store is not None:
+        try:
+            if conversation_id is None:
+                conversation_id = store.create_conversation(title=req.question)
+            history = store.get_history(conversation_id)
+            store.add_message(conversation_id, "user", req.question)
+        except Exception:
+            logger.exception("persistence (load/user-message) failed; continuing without it")
+            history = []
+    else:
+        history = [(m["role"], m["content"]) for m in (req.history or [])
+                   if m.get("role") and m.get("content")]
 
     def event_stream():
+        answer_parts: list[str] = []
+        citations: list[dict] = []
         try:
+            if conversation_id:
+                yield _sse("conversation", {"conversation_id": conversation_id})
             for event in pipeline.stream(req.question, history):
+                if event["type"] == "token":
+                    answer_parts.append(event["data"])
+                elif event["type"] == "citations":
+                    citations = event["data"]
                 yield _sse(event["type"], event["data"])
+            if store is not None and conversation_id:
+                try:
+                    store.add_message(conversation_id, "assistant", "".join(answer_parts),
+                                      citations=citations, metadata={"pipeline": "production"})
+                except Exception:
+                    logger.exception("persistence (assistant-message) failed")
         except Exception:
             logger.exception("stream generation failed")
             yield _sse("error", "internal error")  # generic — no details leaked to client

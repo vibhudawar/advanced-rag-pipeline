@@ -43,3 +43,12 @@ INCLUDE_WEB_SEARCH = os.getenv("INCLUDE_WEB_SEARCH", "true").lower() == "true"
 VECTOR_TOP_K = int(os.getenv("VECTOR_TOP_K", "10"))
 WEB_SEARCH_RESULTS = int(os.getenv("WEB_SEARCH_RESULTS", "3"))
 FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "5"))
+
+# Supabase (WIN 7b). URL is shared with the Next.js client (NEXT_PUBLIC_*); the SECRET key
+# is server-side only (service role, bypasses RLS) — never expose it to the frontend.
+SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY")
+# Direct/pooled Postgres URLs are only needed for migrations (scripts/apply_migration.py),
+# not at runtime — the app talks to Supabase over PostgREST via supabase-py.
+DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_POOLED_URL = os.getenv("DATABASE_POOLED_URL")
