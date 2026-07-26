@@ -18,6 +18,13 @@ from langchain_core.documents import Document
 
 ABSTENTION = "I don't have enough information in the provided documents to answer that."
 
+
+def is_abstention(text: str) -> bool:
+    """True if the answer is a refusal to answer from context. Tolerant to minor LLM wording
+    drift (trailing punctuation, casing) by matching the distinctive phrase rather than the
+    exact string. Used to suppress citations when there is no grounded answer."""
+    return "don't have enough information" in text.lower()
+
 GROUNDED_SYSTEM_PROMPT = (
     "Answer the question using ONLY the numbered context snippets below.\n"
     "- Cite the snippet number(s) you use inline, e.g. [1] or [2].\n"
