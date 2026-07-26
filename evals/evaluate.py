@@ -49,7 +49,8 @@ def evaluate(index: str, pipeline_name: str, golden_path: str, k: int,
     if use_judge:
         from .judges import Judge
         judge = Judge(model=judge_model)
-        print(f"[eval] judge model = {judge.model_name} (generator = gpt-4o-mini)")
+        from config import OPENAI_GENERATION_MODEL
+        print(f"[eval] judge model = {judge.model_name} (generator = {OPENAI_GENERATION_MODEL})")
 
     scores: list[ItemScore] = []
     errors = 0

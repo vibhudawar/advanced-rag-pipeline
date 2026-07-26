@@ -19,8 +19,10 @@ import os
 
 # USD per 1,000,000 tokens. Only models this app actually calls need entries.
 _PRICES: dict[str, tuple[float, float]] = {  # model -> (input, output)
+    "gpt-5.4-nano": (0.20, 1.25),   # default generator (lite, cost-efficient)
+    "gpt-5.4-mini": (0.75, 4.50),
     "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.00),
+    "gpt-4o": (2.50, 10.00),        # eval judge (judge != generator)
 }
 
 
