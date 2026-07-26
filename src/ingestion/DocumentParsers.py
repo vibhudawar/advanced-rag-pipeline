@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
-import PyPDF2
+import pdfplumber
 import docx
 from io import BytesIO
 from langsmith import traceable
@@ -19,19 +19,20 @@ class PDFParser(DocumentParser):
     """PDF document parser"""
     
     def parse(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
-        """Parse PDF document"""
+        """Parse a PDF. Uses pdfplumber, which preserves word spacing far better than PyPDF2
+        (PyPDF2 mangled runs into 'Implementedserver-side', hurting embeddings + readability)."""
         try:
-            pdf_reader = PyPDF2.PdfReader(BytesIO(file_bytes))
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-            
+            with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+                pages = [page.extract_text() or "" for page in pdf.pages]
+                num_pages = len(pdf.pages)
+            text = "\n".join(pages)
+
             return {
                 'text': text.strip(),
                 'metadata': {
                     'filename': filename,
                     'file_type': 'pdf',
-                    'num_pages': len(pdf_reader.pages)
+                    'num_pages': num_pages
                 }
             }
         except Exception as e:

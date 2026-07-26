@@ -163,7 +163,13 @@ export type StreamCallbacks = {
  * dispatching typed events. `signal` lets the caller cancel (unmount / stop button).
  */
 export async function streamChat(
-  params: { question: string; conversationId?: string; token: string; signal?: AbortSignal },
+  params: {
+    question: string
+    conversationId?: string
+    document?: string
+    token: string
+    signal?: AbortSignal
+  },
   cb: StreamCallbacks,
 ): Promise<void> {
   const res = await fetch(`${baseUrl()}/stream`, {
@@ -172,6 +178,7 @@ export async function streamChat(
     body: JSON.stringify({
       question: params.question,
       conversation_id: params.conversationId ?? null,
+      document: params.document ?? null,
     }),
     signal: params.signal,
   })
