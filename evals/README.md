@@ -28,6 +28,30 @@ lexically-precise corpus, where BM25 recovers exact-term matches (entities, rare
 that dense vectors smooth over. Reproduce with
 `python -m evals.evaluate --index beir-scifact --golden data/beir_scifact.jsonl --pipeline hybrid --retrieval-only`.
 
+## Committed test sets (both public, non-PII)
+
+| File | Purpose | Has reference answers? | Corpus |
+|---|---|---|---|
+| `data/beir_scifact.jsonl` | **retrieval** benchmark (hit@k/MRR/nDCG) | no (qrels only) | BEIR scifact, 2000-doc subset |
+| `data/gen_golden.jsonl` | **generation** eval (faithfulness / answer & context relevance / abstention) | yes + 15 unanswerables | same public scifact corpus |
+
+`gen_golden.jsonl` exists because BEIR has no reference answers, so it can't score
+generation. It was produced by `generate_golden.py` over the public `beir-scifact` index
+(reused — no new ingestion, no PII) and shuffled (seed 42). Items are synthetic and marked
+`needs_review: true` — curate a subset before treating the numbers as authoritative.
+
+## Results — generation (gen_golden.jsonl, indicative 20-item sanity run, hybrid + judge)
+
+| faithfulness | answer relevance | context relevance | abstention accuracy |
+|---|---|---|---|
+| 1.00 | 0.99 | 0.91 | **0.80** |
+
+Abstention is the headroom: on unanswerable questions the current pipeline often answers
+anyway instead of declining — the weakness WIN 4 (snippet-relevance gate + grounded
+citations + disciplined "I don't know") targets. Retrieval on this set is ~1.0 (questions
+were generated from their source chunk), which is why retrieval quality is measured on BEIR,
+not here. Full generation baseline is run at the start of WIN 4.
+
 ## Prerequisites
 
 `.env` must contain: `PINECONE_API_KEY`, `COHERE_API_KEY`, and `OPENAI_API_KEY` and/or
@@ -51,8 +75,11 @@ python -m evals.evaluate --index <name> --limit 20      # smoke run
 ```
 
 Reports are written to `evals/reports/<pipeline>-<timestamp>.json`. Compare runs to see a
-win's before/after. `evals/reports/` is disposable; commit `data/golden.jsonl` (it's the
-test set).
+win's before/after. `evals/reports/` is disposable.
+
+> **PII note:** `data/golden.jsonl` is generated from *your* documents, which may be
+> personal — it is **gitignored, not committed**. The committed test sets below are built
+> from public corpora only.
 
 ## BEIR (standardized retrieval numbers — optional, step 2)
 
