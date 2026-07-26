@@ -8,12 +8,9 @@
 # --- LLM orchestration ---
 langchain==0.3.26
 langchain-core==0.3.68
-langchain-experimental==0.3.4          # SemanticChunker (semantic chunking)
 langchain-openai==0.3.25
 langchain-google-genai==2.1.5
 langchain-pinecone==0.2.8
-langgraph==0.5.1
-langgraph-checkpoint-sqlite==2.0.10    # conversation memory (SqliteSaver)
 langsmith==0.4.1                       # tracing
 
 # --- retrieval / models ---
@@ -31,7 +28,6 @@ python-docx==1.2.0
 # --- app / API ---
 pydantic==2.11.7
 python-dotenv==1.1.1
-streamlit==1.46.0                      # current UI (to be replaced by Next.js in WIN 7)
 fastapi==0.115.13                      # WIN 7 backend
 uvicorn[standard]==0.51.0              # ASGI server for the FastAPI app
 python-multipart==0.0.20               # multipart/form-data parsing for /ingest uploads
