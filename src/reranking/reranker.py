@@ -1,9 +1,13 @@
 from abc import ABC, abstractmethod
 from typing import List
 from langchain_core.documents import Document
-from sentence_transformers import CrossEncoder
 from config import COHERE_API_KEY
 import cohere
+
+# NOTE: sentence-transformers (and its ~2GB torch dependency) is imported lazily inside
+# CrossEncoderReranker below. The default reranker is Cohere (rerank-v3.5); the local
+# cross-encoder is an optional fallback. Keeping the import lazy lets the default install
+# stay torch-free (see requirements-optional.txt).
 
 class Reranker(ABC):
     """Abstract base class for document rerankers"""
@@ -28,6 +32,13 @@ class CrossEncoderReranker(Reranker):
     """Cross-encoder reranker implementation using LangChain"""
 
     def __init__(self, model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
+        try:
+            from sentence_transformers import CrossEncoder
+        except ImportError as e:
+            raise ImportError(
+                "CrossEncoderReranker requires the optional 'sentence-transformers' package "
+                "(pip install -r requirements-optional.txt). The default reranker is Cohere."
+            ) from e
         self.model = CrossEncoder(model)
         self.model_name = "MS-MARCO-MiniLM-L-6-v2"
 
