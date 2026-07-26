@@ -127,3 +127,18 @@
     @apply font-sans;
     }
 }
+/* WIN 7c — blue accent (blue-600 light / blue-500 dark) over the neutral base */
+:root {
+    --primary: oklch(0.546 0.245 262.881);
+    --primary-foreground: oklch(0.985 0 0);
+    --ring: oklch(0.546 0.245 262.881);
+    --sidebar-primary: oklch(0.546 0.245 262.881);
+    --sidebar-ring: oklch(0.546 0.245 262.881);
+}
+.dark {
+    --primary: oklch(0.623 0.214 259.815);
+    --primary-foreground: oklch(0.985 0 0);
+    --ring: oklch(0.623 0.214 259.815);
+    --sidebar-primary: oklch(0.623 0.214 259.815);
+    --sidebar-ring: oklch(0.623 0.214 259.815);
+}
