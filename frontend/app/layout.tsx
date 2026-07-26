@@ -24,7 +24,9 @@ export default function RootLayout({
       suppressHydrationWarning
       className={cn("antialiased", fontMono.variable, "font-sans", inter.variable)}
     >
-      <body>
+      {/* suppressHydrationWarning: browser extensions (e.g. ColorZilla's cz-shortcut-listen)
+          inject attributes on <body> before React hydrates, which would otherwise warn. */}
+      <body suppressHydrationWarning>
         <ThemeProvider>
           <TooltipProvider>{children}</TooltipProvider>
           <Toaster />

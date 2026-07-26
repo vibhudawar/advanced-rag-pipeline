@@ -51,6 +51,7 @@ export function Composer({
             }
           }}
           rows={1}
+          aria-label="Message"
           placeholder="Ask a question…"
           className="max-h-[200px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
         />
