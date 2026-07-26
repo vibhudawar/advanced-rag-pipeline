@@ -73,6 +73,13 @@ venv.bak/
 .venv/
 
 # ============================================================================
+# Frontend (Next.js) — re-include source dirs the Python rules above catch.
+# The `lib/` and `build/` venv rules also match `frontend/lib` / `frontend/build`,
+# which are real app source, not Python artifacts.
+# ============================================================================
+!frontend/lib/
+
+# ============================================================================
 # IDE / Editor
 # ============================================================================
 # VSCode
