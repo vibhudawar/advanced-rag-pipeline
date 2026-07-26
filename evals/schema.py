@@ -8,20 +8,21 @@ generator and the evaluator hash `page_content` the same way, so they always lin
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
+# Single source of truth for chunk identity — shared with the production pipeline so eval
+# ground-truth hashes line up with what the pipeline retrieves. Re-exported here for the
+# eval modules that import it from `.schema`.
+from src.retrieval.hashing import (
+    content_hash,  # noqa: F401  (re-exported for eval modules)
+)
+
 QType = Literal["factoid", "multi_hop", "aggregation", "unanswerable"]
 Source = Literal["synthetic", "curated", "beir"]
-
-
-def content_hash(text: str) -> str:
-    """Stable 16-hex-char fingerprint of a chunk's text. Used as the retrieval id."""
-    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass
