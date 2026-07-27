@@ -13,7 +13,7 @@ class Reranker(ABC):
     """Abstract base class for document rerankers"""
 
     @abstractmethod
-    def rerank(self, query: str, documents: List[Document], top_k: int = 5, min_score: float = 0.1) -> List[Document]:
+    def rerank(self, query: str, documents: List[Document], top_k: int = 5, min_score: float = 0.0) -> List[Document]:
         """Rerank documents based on relevance to query
 
         Args:
@@ -42,14 +42,14 @@ class CrossEncoderReranker(Reranker):
         self.model = CrossEncoder(model)
         self.model_name = "MS-MARCO-MiniLM-L-6-v2"
 
-    def rerank(self, query: str, documents: List[Document], top_k: int = 5, min_score: float = 0.1) -> List[Document]:
+    def rerank(self, query: str, documents: List[Document], top_k: int = 5, min_score: float = 0.0) -> List[Document]:
         """Rerank documents using Cross-Encoder
 
         Args:
             query: Search query
             documents: List of documents to rerank
             top_k: Maximum number of documents to return
-            min_score: Minimum relevance score threshold (default: 0.1)
+            min_score: Minimum relevance score threshold (default 0.0 = keep all; the LLM snippet gate does relevance filtering)
 
         Returns:
             Filtered and reranked documents with score >= min_score
@@ -95,14 +95,14 @@ class CohereReranker(Reranker):
         self.client = cohere.ClientV2(api_key=cohere_api_key)
         self.model = model
     
-    def rerank(self, query: str, documents: List[Document], top_k: int = 5, min_score: float = 0.1) -> List[Document]:
+    def rerank(self, query: str, documents: List[Document], top_k: int = 5, min_score: float = 0.0) -> List[Document]:
         """Rerank documents using Cohere API v2
 
         Args:
             query: Search query
             documents: List of documents to rerank
             top_k: Maximum number of documents to return
-            min_score: Minimum relevance score threshold (default: 0.1)
+            min_score: Minimum relevance score threshold (default 0.0 = keep all; the LLM snippet gate does relevance filtering)
 
         Returns:
             Filtered and reranked documents with score >= min_score
