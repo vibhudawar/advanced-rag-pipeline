@@ -96,10 +96,13 @@ def _meta_matches(meta: dict, filter_dict: dict) -> bool:
 
 def _citation(doc: Document, n: int) -> dict:
     md = doc.metadata or {}
+    # Show the raw chunk (Contextual Retrieval stores it in metadata) rather than the
+    # header-prefixed text that's embedded/indexed, so citations stay clean.
+    snippet = md.get("raw_text") or doc.page_content
     return {
         "n": n,
         "source": md.get("filename") or md.get("source") or md.get("beir_id") or f"chunk-{n}",
-        "snippet": doc.page_content[:300],
+        "snippet": snippet[:300],
         "score": md.get("rerank_score") or md.get("score"),
     }
 
