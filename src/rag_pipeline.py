@@ -36,6 +36,7 @@ from src.ingestion.EmbeddingCreator import get_embedder
 from src.reranking.reranker import get_reranker
 from src.retrieval.hashing import content_hash
 from src.retrieval.hybrid import BM25Index, reciprocal_rank_fusion
+from src.retrieval.nlu import condense_query
 from src.retrieval.snippet_gate import SnippetGate
 
 History = Sequence[tuple[str, str]]  # [(role, content), ...]
@@ -156,9 +157,14 @@ class RagPipeline:
                     metadata={k: meta[k] for k in ("filename", "source", "user_id")
                               if meta.get(k)},
                 ))
+        # When the user has scoped to a specific document, trust it: feed more of the doc and
+        # skip the relevance gate (the gate is for separating relevant from irrelevant across a
+        # mixed corpus — pointless, and harmful for vague asks, once we're inside one chosen doc).
+        doc_scoped = bool(filter_dict and filter_dict.get("filename"))
+        rerank_k = self.top_k if doc_scoped else self.rerank_top_k
         reranked = self.reranker.rerank(query=query, documents=docs,
-                                        top_k=self.rerank_top_k) if docs else []
-        gated = self.gate.filter(query, reranked) if self.gate else reranked
+                                        top_k=rerank_k) if docs else []
+        gated = reranked if (doc_scoped or not self.gate) else self.gate.filter(query, reranked)
         return fused, gated
 
     @traceable(name="rag_answer", run_type="chain")
@@ -168,7 +174,10 @@ class RagPipeline:
         # get_usage_metadata_callback aggregates token usage across every LLM call in the run
         # (snippet gate + generation) via a contextvar — no need to thread callbacks through.
         with get_usage_metadata_callback() as cb:
-            fused, gated = self._retrieve_gated(query, filter_dict)
+            # Retrieve on a standalone query (resolves conversational follow-ups); generate with
+            # the original question + history so the answer still reads naturally.
+            search_query = condense_query(self.generator.llm, query, history)
+            fused, gated = self._retrieve_gated(search_query, filter_dict)
             ans = generate_grounded(self.generator.llm, query, gated, history)
             usage = summarize_usage(cb.usage_metadata)
         abstained = is_abstention(ans)
@@ -192,7 +201,8 @@ class RagPipeline:
         t0 = time.time()
         parts: list[str] = []
         with get_usage_metadata_callback() as cb:
-            _, gated = self._retrieve_gated(query, filter_dict)
+            search_query = condense_query(self.generator.llm, query, history)
+            _, gated = self._retrieve_gated(search_query, filter_dict)
             for token in stream_grounded(self.generator.llm, query, gated, history):
                 parts.append(token)
                 yield {"type": "token", "data": token}
