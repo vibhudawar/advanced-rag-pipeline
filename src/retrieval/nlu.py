@@ -20,10 +20,44 @@ right shape or LangChain retries — no manual parsing.
 from __future__ import annotations
 
 import datetime
+from collections.abc import Sequence
 
 from pydantic import BaseModel, Field
 
 from config import GEMINI_API_KEY, OPENAI_API_KEY
+
+_CONDENSE_PROMPT = """Given a conversation and a follow-up message, rewrite the follow-up into a \
+standalone search query for retrieving from the user's documents.
+- Resolve references ("it", "that", "instead", "more") using the conversation.
+- Keep named entities and any constraints.
+- Do NOT broaden or add topics; capture only what the user is asking for.
+- If the follow-up is already standalone, return it unchanged.
+Return ONLY the rewritten query, no preamble.
+
+Conversation:
+{history}
+
+Follow-up: {query}
+
+Standalone search query:"""
+
+
+def condense_query(llm, query: str, history: Sequence[tuple[str, str]] | None) -> str:
+    """Rewrite a conversational follow-up into a standalone retrieval query using history.
+
+    Returns `query` unchanged when there's no history (first turn / evals) — so standalone
+    queries are never broadened (which regressed the benchmark). One cheap LLM call otherwise;
+    falls back to the original query on any error.
+    """
+    if not history:
+        return query
+    hist = "\n".join(f"{role}: {content}" for role, content in list(history)[-6:])
+    try:
+        resp = llm.invoke(_CONDENSE_PROMPT.format(history=hist, query=query))
+        text = (resp.content if hasattr(resp, "content") else str(resp)).strip().strip('"')
+        return text or query
+    except Exception:
+        return query
 
 
 class QueryUnderstanding(BaseModel):
