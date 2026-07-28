@@ -34,6 +34,15 @@ CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 CHUNKING_STRATEGY = os.getenv("CHUNKING_STRATEGY", "recursive")
 
+# Contextual Retrieval (Win 1): at ingest, prepend an LLM-generated context header to each
+# chunk before embedding + BM25-indexing, so a chunk retrieved in isolation still carries its
+# place in the document. Header generation uses a cheap model with the doc as a cached prefix;
+# very long docs are summarised first (CONTEXT_MAX_DOC_CHARS). Toggle off to fall back to plain
+# chunks. See docs/win-1-contextual-retrieval.md.
+CONTEXTUAL_RETRIEVAL = os.getenv("CONTEXTUAL_RETRIEVAL", "true").lower() == "true"
+CONTEXT_MODEL = os.getenv("CONTEXT_MODEL", "gpt-4o-mini")
+CONTEXT_MAX_DOC_CHARS = int(os.getenv("CONTEXT_MAX_DOC_CHARS", "40000"))
+
 # Web Search Configuration
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
