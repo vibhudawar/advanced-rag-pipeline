@@ -256,6 +256,12 @@ def _ingest_bytes(data: bytes, ext: str, filename: str, user_id: str) -> int:
             "Upload a smaller file or split it."
         )
 
+    # Contextual Retrieval (Win 1): prepend a situating header to each chunk before embedding.
+    from config import CONTEXTUAL_RETRIEVAL
+    if CONTEXTUAL_RETRIEVAL:
+        from src.ingestion.contextualizer import contextualize_chunks
+        chunks = contextualize_chunks(chunks, doc_text=text)
+
     embedder = get_embedder(provider=EMBEDDING_PROVIDER)
     get_vector_store().add_documents(RAG_INDEX, chunks, embedder)
     return len(chunks)
