@@ -45,7 +45,7 @@ def get_current_user(authorization: str | None = Header(default=None)) -> AuthUs
 
     try:
         res = store.client.auth.get_user(token)
-    except Exception:
+    except Exception:  # noqa: BLE001 - any auth/client/network failure means the token is unusable
         logger.info("token validation failed")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
 
