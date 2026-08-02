@@ -19,9 +19,17 @@ import argparse
 import json
 import os
 import time
+from dataclasses import asdict
 from pathlib import Path
 
-from .metrics import hit_rate_at_k, mean, ndcg_at_k, reciprocal_rank
+from .metrics import (
+    citation_validity,
+    hit_rate_at_k,
+    mean,
+    ndcg_at_k,
+    reciprocal_rank,
+    source_coverage,
+)
 from .pipeline_adapter import PIPELINES
 from .schema import ItemScore, read_jsonl
 
@@ -77,8 +85,17 @@ def evaluate(index: str, pipeline_name: str, golden_path: str, k: int,
                     s.faithfulness = judge.faithfulness(res.answer, res.contexts).score
                     s.answer_relevance = judge.answer_relevance(it.query, res.answer).score
                     s.context_relevance = judge.context_relevance(it.query, res.contexts).score
+            # citation + multi-doc coverage (pure, no judge) — computed whenever we have an answer
+            s.citation_valid = citation_validity(res.answer, res.citations, bool(s.abstained))
+            s.source_coverage = source_coverage(res.citations, it.expected_sources)
 
         s.notes["latency_s"] = round(res.latency_s, 2)
+        s.notes["query"] = it.query
+        s.notes["answer"] = res.answer
+        s.notes["cited_sources"] = [c.get("source") for c in res.citations]
+        # capture contexts only when faithfulness is imperfect, for diagnosis without a rerun
+        if s.faithfulness is not None and s.faithfulness < 1.0:
+            s.notes["contexts"] = [c[:500] for c in res.contexts]
         scores.append(s)
 
     return _aggregate(scores, k, errors, pipeline_name, index)
@@ -105,8 +122,13 @@ def _aggregate(scores: list[ItemScore], k: int, errors: int, pipeline_name: str,
         "behaviour": {
             "abstention_accuracy": round(mean([1.0 if s.abstention_correct else 0.0
                                                for s in scores if s.abstention_correct is not None]), 4),
+            "citation_validity": round(mean([1.0 if s.citation_valid else 0.0
+                                             for s in scores if s.citation_valid is not None]), 4),
+            "source_coverage": round(mean([s.source_coverage for s in scores
+                                           if s.source_coverage is not None]), 4),
         },
         "latency_s_mean": round(mean([s.notes.get("latency_s") for s in scores]), 2),
+        "per_item": [asdict(s) for s in scores],
     }
     return report
 
@@ -124,6 +146,8 @@ def _print_table(r: dict) -> None:
         ("answer_relevance", gen["answer_relevance"]),
         ("context_relevance", gen["context_relevance"]),
         ("abstention_accuracy", beh["abstention_accuracy"]),
+        ("citation_validity", beh.get("citation_validity", 0.0)),
+        ("source_coverage", beh.get("source_coverage", 0.0)),
         ("latency_s (mean)", r["latency_s_mean"]),
     ]
     for name, val in rows:
