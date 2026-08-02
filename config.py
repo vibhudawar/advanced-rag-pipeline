@@ -43,6 +43,12 @@ CHUNKING_STRATEGY = os.getenv("CHUNKING_STRATEGY", "recursive")
 CONTEXTUAL_RETRIEVAL = os.getenv("CONTEXTUAL_RETRIEVAL", "true").lower() == "true"
 CONTEXT_MODEL = os.getenv("CONTEXT_MODEL", "gpt-4o-mini")
 CONTEXT_MAX_DOC_CHARS = int(os.getenv("CONTEXT_MAX_DOC_CHARS", "40000"))
+# The full doc is resent as a per-chunk prefix, so contextualization input tokens ≈
+# doc_tokens × num_chunks. A 35k-char doc in 53 chunks is ~470k tokens — over OpenAI's 200k
+# TPM in one burst. When the estimated blowup exceeds this budget we situate chunks against a
+# one-shot summary instead (bounded, O(1)); small/few-chunk docs keep the full-doc context.
+CONTEXT_TOKEN_BUDGET = int(os.getenv("CONTEXT_TOKEN_BUDGET", "120000"))
+CONTEXT_MAX_RETRIES = int(os.getenv("CONTEXT_MAX_RETRIES", "6"))  # backoff on 429s
 
 # Financial-doc hygiene (Win 18): strip legal/disclosure boilerplate (per-page licensing
 # watermark, front-cover Reg-AC footer, and the trailing disclosures/jurisdiction/other-ticker
