@@ -29,6 +29,8 @@ GROUNDED_SYSTEM_PROMPT = (
     "Answer the question using ONLY the numbered context snippets below.\n"
     "- Cite the snippet number(s) you use inline, e.g. [1] or [2].\n"
     "- Do NOT use outside knowledge.\n"
+    "- When the question compares or spans multiple documents, synthesize across the relevant "
+    "snippets rather than answering from only one.\n"
     f'- If the context does not contain enough information, reply exactly: "{ABSTENTION}"\n'
 )
 
