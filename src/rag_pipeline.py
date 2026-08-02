@@ -28,11 +28,11 @@ from langchain_core.documents import Document
 from langsmith import traceable
 
 from config import EMBEDDING_PROVIDER, LLM_PROVIDER
-from src.observability import summarize_usage
 from src.generation.grounded import generate_grounded, is_abstention, stream_grounded
 from src.generation.llm_generator import get_llm_generator
 from src.ingestion.DBIngestion import get_vector_store
 from src.ingestion.EmbeddingCreator import get_embedder
+from src.observability import summarize_usage
 from src.reranking.reranker import get_reranker
 from src.retrieval.hashing import content_hash
 from src.retrieval.hybrid import BM25Index, reciprocal_rank_fusion

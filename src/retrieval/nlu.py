@@ -56,7 +56,7 @@ def condense_query(llm, query: str, history: Sequence[tuple[str, str]] | None) -
         resp = llm.invoke(_CONDENSE_PROMPT.format(history=hist, query=query))
         text = (resp.content if hasattr(resp, "content") else str(resp)).strip().strip('"')
         return text or query
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort rewrite; fall back to the original query
         return query
 
 

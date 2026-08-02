@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
 from src.utils.AgenticChunkerHelper import (
     PropositionExtractor,
@@ -52,6 +52,57 @@ class RecursiveChunker(Chunker):
             })
         
         return chunked_documents
+
+
+class MarkdownChunker(Chunker):
+    """Structure-aware chunking for markdown (what pymupdf4llm emits for PDFs).
+
+    Two stages: split on markdown headers first (so a section stays coherent and its heading
+    path is captured), then recursively split any section longer than chunk_size. Each chunk
+    carries a `section` metadata field (e.g. "KEY INSIGHTS > Cloud Marches On") for retrieval
+    context + citations. Degrades to plain recursive splitting when there are no headers (txt).
+    """
+
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+        self.chunk_size = chunk_size
+        self.header_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=[("#", "h1"), ("##", "h2"), ("###", "h3")],
+            strip_headers=False,
+        )
+        self.recursive = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size, chunk_overlap=chunk_overlap
+        )
+
+    def chunk_text(self, text: str, metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        metadata = metadata or {}
+        try:
+            sections = self.header_splitter.split_text(text)
+        except Exception:
+            sections = []
+
+        # (chunk_text, section_path) pairs
+        pieces: List[tuple] = []
+        if not sections:
+            for p in self.recursive.split_text(text):
+                pieces.append((p, ""))
+        else:
+            for sec in sections:
+                labels = [v.strip("*# ").strip() for v in sec.metadata.values() if v]
+                section_path = " > ".join(x for x in labels if x)
+                if len(sec.page_content) > self.chunk_size:
+                    for p in self.recursive.split_text(sec.page_content):
+                        pieces.append((p, section_path))
+                else:
+                    pieces.append((sec.page_content, section_path))
+
+        out: List[Dict[str, Any]] = []
+        for i, (chunk, section_path) in enumerate(pieces):
+            cm = metadata.copy()
+            cm.update({"chunk_index": i, "chunk_size": len(chunk), "total_chunks": len(pieces)})
+            if section_path:
+                cm["section"] = section_path[:200]
+            out.append({"text": chunk, "metadata": cm})
+        return out
 
 
 class SemanticChunkerFunction(Chunker):
@@ -241,6 +292,10 @@ def get_chunker(strategy: str = "recursive", **kwargs) -> Chunker:
             if k in ['chunk_size', 'chunk_overlap']
         }
         return RecursiveChunker(**recursive_kwargs)
+
+    elif strategy == "markdown":
+        md_kwargs = {k: v for k, v in kwargs.items() if k in ['chunk_size', 'chunk_overlap']}
+        return MarkdownChunker(**md_kwargs)
 
     elif strategy == "semantic":
         # Semantic chunker requires embedder

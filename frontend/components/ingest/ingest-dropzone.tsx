@@ -35,8 +35,9 @@ export function IngestDropzone() {
     for (const file of list) {
       setUploading(file.name)
       try {
-        const { num_chunks } = await ingestDocument(file, token)
-        toast.success(`Indexed ${file.name} (${num_chunks} chunks)`)
+        const res = await ingestDocument(file, token)
+        if (res.duplicate) toast.info(`${file.name} is already ingested — skipped`)
+        else toast.success(`Indexed ${file.name} (${res.num_chunks} chunks)`)
       } catch (err) {
         toast.error(err instanceof Error ? err.message : `Failed to upload ${file.name}`)
       } finally {
