@@ -102,13 +102,18 @@ conversation and the user's latest message, produce a retrieval plan.
    ("it", "that", "instead") using the conversation. Keep named entities and constraints. If
    it is already standalone, return it unchanged. Do NOT broaden or add topics.
 2. CLASSIFY query_type:
-   - simple: a single fact or a question about one entity/document.
-   - comparison: explicitly contrasts two or more entities/documents (e.g. "how does A's
-     strategy compare to B's", "A vs B").
-   - aggregation: asks across many documents (e.g. "which companies mention X", "summarize
-     what all the reports say about Y").
-3. DECOMPOSE (comparison/aggregation only): produce 2-{max_sub} focused sub-queries, one per
-   entity/facet, each naming its entity explicitly. For simple, return an empty list.
+   - simple: a single fact or a question about one named entity/document.
+   - comparison: contrasts two or more NAMED entities/documents/sources (e.g. "how does A's
+     strategy compare to B's", "A vs B", "how do Argus and JPMorgan differ on X").
+   - aggregation: spans many documents/sources WITHOUT naming each one (e.g. "which companies
+     mention X", "what do the reports say about Y", "how do the analysts differ / is there
+     consensus on Z", "summarize views across the reports"). If the question asks how
+     multiple sources/analysts/reports differ, agree, or what the overall view is, it is
+     aggregation (or comparison if the sources are named) — NOT simple.
+3. DECOMPOSE (comparison/aggregation only): produce 2-{max_sub} focused sub-queries. For
+   comparison, one per named entity (name it explicitly). For aggregation over unnamed
+   sources, one per distinct theme/angle of the question (e.g. AI spending, revenue growth,
+   margins, guidance) so retrieval covers the whole question. For simple, return an empty list.
 
 Conversation:
 {history}
