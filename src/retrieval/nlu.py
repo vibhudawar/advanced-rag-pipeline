@@ -20,11 +20,19 @@ right shape or LangChain retries — no manual parsing.
 from __future__ import annotations
 
 import datetime
+import logging
 from collections.abc import Sequence
 
 from pydantic import BaseModel, Field
 
 from config import GEMINI_API_KEY, OPENAI_API_KEY
+
+logger = logging.getLogger("rag.retrieval.nlu")
+
+# Cap the fan-out. Each sub-query is a separate retrieval pass (vector + BM25 + rerank), so
+# this bounds cost for comparison/aggregation questions. 4 covers "compare A vs B vs C" and
+# most multi-entity asks; beyond that, extra sub-queries add cost without much recall.
+MAX_SUB_QUERIES = 4
 
 _CONDENSE_PROMPT = """Given a conversation and a follow-up message, rewrite the follow-up into a \
 standalone search query for retrieving from the user's documents.
@@ -58,6 +66,98 @@ def condense_query(llm, query: str, history: Sequence[tuple[str, str]] | None) -
         return text or query
     except Exception:  # noqa: BLE001 - best-effort rewrite; fall back to the original query
         return query
+
+
+class QueryPlan(BaseModel):
+    """Routing + decomposition decision for a single user turn (Phase 2).
+
+    One structured LLM call replaces the plain `condense_query` rewrite: it resolves the
+    follow-up into a standalone query AND decides how to retrieve for it.
+      - `simple`      : one document / one fact -> retrieve on `standalone_query` alone
+                        (`sub_queries` empty). Identical to the pre-Phase-2 path.
+      - `comparison`  : contrast entities/documents ("A vs B in AI") -> one focused
+                        sub-query per side, retrieved separately so BOTH sides reach the
+                        generator instead of the reranker collapsing onto the stronger match.
+      - `aggregation` : span many documents ("which companies mention X") -> a sub-query per
+                        facet/entity so coverage is broad, not top-k-of-one.
+    """
+
+    standalone_query: str = Field(
+        description="The user's question rewritten to be fully self-contained (references resolved from history). Unchanged if already standalone."
+    )
+    query_type: str = Field(
+        default="simple",
+        description="One of: simple, comparison, aggregation. Use simple unless the question genuinely contrasts or spans multiple entities/documents.",
+    )
+    sub_queries: list[str] = Field(
+        default_factory=list,
+        description="For comparison/aggregation ONLY: 2-4 focused retrieval queries, one per entity/facet, each naming its entity. Empty for simple questions.",
+    )
+
+
+_PLAN_PROMPT = """You plan retrieval for a RAG system over a document corpus. Given the \
+conversation and the user's latest message, produce a retrieval plan.
+
+1. STANDALONE: rewrite the latest message into a self-contained query. Resolve references
+   ("it", "that", "instead") using the conversation. Keep named entities and constraints. If
+   it is already standalone, return it unchanged. Do NOT broaden or add topics.
+2. CLASSIFY query_type:
+   - simple: a single fact or a question about one named entity/document.
+   - comparison: contrasts two or more NAMED entities/documents/sources (e.g. "how does A's
+     strategy compare to B's", "A vs B", "how do Argus and JPMorgan differ on X").
+   - aggregation: spans many documents/sources WITHOUT naming each one (e.g. "which companies
+     mention X", "what do the reports say about Y", "how do the analysts differ / is there
+     consensus on Z", "summarize views across the reports"). If the question asks how
+     multiple sources/analysts/reports differ, agree, or what the overall view is, it is
+     aggregation (or comparison if the sources are named) — NOT simple.
+3. DECOMPOSE (comparison/aggregation only): produce 2-{max_sub} focused sub-queries. For
+   comparison, one per named entity (name it explicitly). For aggregation over unnamed
+   sources, one per distinct theme/angle of the question (e.g. AI spending, revenue growth,
+   margins, guidance) so retrieval covers the whole question. For simple, return an empty list.
+
+Conversation:
+{history}
+
+Latest message: {query}"""
+
+
+def plan_query(llm, query: str, history: Sequence[tuple[str, str]] | None) -> QueryPlan:
+    """Route + (optionally) decompose a user turn in one structured LLM call.
+
+    Falls back to a `simple` plan on the original query if the call fails or returns junk —
+    the pipeline then behaves exactly as it did pre-Phase-2. Sub-queries are de-duplicated and
+    capped at MAX_SUB_QUERIES to bound retrieval cost.
+    """
+    hist = "\n".join(f"{role}: {content}" for role, content in list(history or [])[-6:]) or "(none)"
+    try:
+        chain = llm.with_structured_output(QueryPlan)
+        plan: QueryPlan = chain.invoke(
+            _PLAN_PROMPT.format(history=hist, query=query, max_sub=MAX_SUB_QUERIES)
+        )
+    except Exception:  # noqa: BLE001 - best-effort planning; degrade to a simple single-query plan
+        logger.info("query planning failed; falling back to simple plan")
+        return QueryPlan(standalone_query=query, query_type="simple", sub_queries=[])
+
+    standalone = (plan.standalone_query or query).strip() or query
+    qtype = plan.query_type if plan.query_type in {"simple", "comparison", "aggregation"} else "simple"
+    if qtype == "simple":
+        return QueryPlan(standalone_query=standalone, query_type="simple", sub_queries=[])
+
+    # Dedup sub-queries (case-insensitive), drop empties, cap the fan-out. If decomposition
+    # produced nothing usable, treat it as simple rather than fanning out on the whole query.
+    seen: set[str] = set()
+    subs: list[str] = []
+    for s in plan.sub_queries:
+        s = (s or "").strip()
+        key = s.lower()
+        if s and key not in seen:
+            seen.add(key)
+            subs.append(s)
+        if len(subs) >= MAX_SUB_QUERIES:
+            break
+    if not subs:
+        return QueryPlan(standalone_query=standalone, query_type="simple", sub_queries=[])
+    return QueryPlan(standalone_query=standalone, query_type=qtype, sub_queries=subs)
 
 
 class QueryUnderstanding(BaseModel):
