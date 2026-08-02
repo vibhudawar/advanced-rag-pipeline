@@ -27,7 +27,14 @@ from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.documents import Document
 from langsmith import traceable
 
-from config import EMBEDDING_PROVIDER, LLM_PROVIDER
+from config import (
+    EMBEDDING_PROVIDER,
+    LLM_PROVIDER,
+    RAG_MULTI_FINAL_K,
+    RAG_MULTI_QUERY,
+    RAG_PER_DOC_CAP,
+    RAG_UNION_RERANK_K,
+)
 from src.generation.grounded import generate_grounded, is_abstention, stream_grounded
 from src.generation.llm_generator import get_llm_generator
 from src.ingestion.DBIngestion import get_vector_store
@@ -36,7 +43,7 @@ from src.observability import summarize_usage
 from src.reranking.reranker import get_reranker
 from src.retrieval.hashing import content_hash
 from src.retrieval.hybrid import BM25Index, reciprocal_rank_fusion
-from src.retrieval.nlu import condense_query
+from src.retrieval.nlu import QueryPlan, plan_query
 from src.retrieval.snippet_gate import SnippetGate
 
 History = Sequence[tuple[str, str]]  # [(role, content), ...]
@@ -94,6 +101,39 @@ def _meta_matches(meta: dict, filter_dict: dict) -> bool:
     return all(meta.get(k) == v for k, v in filter_dict.items())
 
 
+def _doc_source(doc: Document) -> str:
+    md = doc.metadata or {}
+    return md.get("filename") or md.get("source") or ""
+
+
+def _diversify(docs: list[Document], per_doc_cap: int, final_k: int) -> list[Document]:
+    """Select up to `final_k` docs, round-robin across source documents, so a multi-doc answer
+    sees several sources instead of the top-k all coming from one.
+
+    `docs` must already be ranked best-first (post-rerank). Round 0 takes each source's best
+    chunk, round 1 its second-best, etc., up to `per_doc_cap` per source. Rank order within a
+    source is preserved. Chunks with no identifiable source share the "" bucket.
+    """
+    from collections import defaultdict
+
+    buckets: dict[str, list[Document]] = defaultdict(list)
+    order: list[str] = []
+    for d in docs:
+        src = _doc_source(d)
+        if src not in buckets:
+            order.append(src)
+        buckets[src].append(d)
+
+    selected: list[Document] = []
+    for round_i in range(per_doc_cap):
+        for src in order:
+            if round_i < len(buckets[src]):
+                selected.append(buckets[src][round_i])
+                if len(selected) >= final_k:
+                    return selected
+    return selected
+
+
 def _citation(doc: Document, n: int) -> dict:
     md = doc.metadata or {}
     # Show the raw chunk (Contextual Retrieval stores it in metadata) rather than the
@@ -109,11 +149,18 @@ def _citation(doc: Document, n: int) -> dict:
 
 class RagPipeline:
     def __init__(self, index_name: str, top_k: int = 10, rerank_top_k: int = 5,
-                 rrf_k: int = 60, use_gate: bool = True):
+                 rrf_k: int = 60, use_gate: bool = True, multi_query: bool | None = None,
+                 union_rerank_k: int | None = None, per_doc_cap: int | None = None,
+                 multi_final_k: int | None = None):
         self.index_name = index_name
         self.top_k = top_k
         self.rerank_top_k = rerank_top_k
         self.rrf_k = rrf_k
+        # Phase 2 multi-query knobs (config-driven defaults; overridable for evals).
+        self.multi_query = RAG_MULTI_QUERY if multi_query is None else multi_query
+        self.union_rerank_k = union_rerank_k or RAG_UNION_RERANK_K
+        self.per_doc_cap = per_doc_cap or RAG_PER_DOC_CAP
+        self.multi_final_k = multi_final_k or RAG_MULTI_FINAL_K
         self.embedder = get_embedder(provider=EMBEDDING_PROVIDER)
         self.vector_store = get_vector_store()
         self.reranker = get_reranker()
@@ -146,11 +193,13 @@ class RagPipeline:
         """Fused hashes, pre-rerank — used by the retrieval-only eval."""
         return self._fused(query)[0]
 
-    def _retrieve_gated(self, query: str,
-                        filter_dict: dict | None = None) -> tuple[list[str], list[Document]]:
+    def _fused_docs(self, query: str, filter_dict: dict | None,
+                    limit: int) -> tuple[list[str], list[Document]]:
+        """Run hybrid retrieval and materialize the top `limit` fused hits as Documents
+        (vector hits carry full metadata; BM25-only hits are rebuilt from the cached corpus)."""
         fused, by_hash = self._fused(query, filter_dict)
         docs: list[Document] = []
-        for h in fused[:self.top_k]:
+        for h in fused[:limit]:
             if h in by_hash:
                 docs.append(by_hash[h])
             elif h in self.bm25.texts_by_key:
@@ -160,6 +209,11 @@ class RagPipeline:
                     metadata={k: meta[k] for k in ("filename", "source", "user_id")
                               if meta.get(k)},
                 ))
+        return fused, docs
+
+    def _retrieve_gated(self, query: str,
+                        filter_dict: dict | None = None) -> tuple[list[str], list[Document]]:
+        fused, docs = self._fused_docs(query, filter_dict, self.top_k)
         # When the user has scoped to a specific document, trust it: feed more of the doc and
         # skip the relevance gate (the gate is for separating relevant from irrelevant across a
         # mixed corpus — pointless, and harmful for vague asks, once we're inside one chosen doc).
@@ -170,6 +224,35 @@ class RagPipeline:
         gated = reranked if (doc_scoped or not self.gate) else self.gate.filter(query, reranked)
         return fused, gated
 
+    def _retrieve_plan(self, plan: QueryPlan,
+                       filter_dict: dict | None = None) -> tuple[list[str], list[Document]]:
+        """Route retrieval by the query plan. Simple queries (and any doc-scoped request) take
+        the single-query gated path unchanged. Comparison/aggregation fan out one retrieval pass
+        per sub-query, rerank the deduped union against the overall question, gate it, then
+        diversify across source documents so several docs reach the generator for synthesis."""
+        doc_scoped = bool(filter_dict and filter_dict.get("filename"))
+        if not self.multi_query or plan.query_type == "simple" or not plan.sub_queries or doc_scoped:
+            return self._retrieve_gated(plan.standalone_query, filter_dict)
+
+        queries = [plan.standalone_query, *plan.sub_queries]
+        fused_all: list[str] = []
+        union: dict[str, Document] = {}
+        for q in queries:
+            fused, docs = self._fused_docs(q, filter_dict, self.top_k)
+            fused_all.extend(fused)
+            for d in docs:
+                union.setdefault(content_hash(d.page_content), d)
+        if not union:
+            return fused_all, []
+
+        # Rerank the union against the overall question (a chunk about either side is relevant to
+        # a comparison), gate it, then spread the survivors across source documents.
+        reranked = self.reranker.rerank(query=plan.standalone_query,
+                                        documents=list(union.values()), top_k=self.union_rerank_k)
+        gated = reranked if not self.gate else self.gate.filter(plan.standalone_query, reranked)
+        diversified = _diversify(gated, self.per_doc_cap, self.multi_final_k)
+        return fused_all, diversified
+
     @traceable(name="rag_answer", run_type="chain")
     def answer(self, query: str, history: History | None = None,
                filter_dict: dict | None = None) -> AnswerResult:
@@ -177,10 +260,11 @@ class RagPipeline:
         # get_usage_metadata_callback aggregates token usage across every LLM call in the run
         # (snippet gate + generation) via a contextvar — no need to thread callbacks through.
         with get_usage_metadata_callback() as cb:
-            # Retrieve on a standalone query (resolves conversational follow-ups); generate with
-            # the original question + history so the answer still reads naturally.
-            search_query = condense_query(self.generator.llm, query, history)
-            fused, gated = self._retrieve_gated(search_query, filter_dict)
+            # Plan retrieval (resolve follow-ups + route simple/comparison/aggregation), then
+            # retrieve accordingly; generate with the original question + history so the answer
+            # still reads naturally.
+            plan = plan_query(self.generator.llm, query, history)
+            fused, gated = self._retrieve_plan(plan, filter_dict)
             ans = generate_grounded(self.generator.llm, query, gated, history)
             usage = summarize_usage(cb.usage_metadata)
         abstained = is_abstention(ans)
@@ -194,7 +278,9 @@ class RagPipeline:
             candidate_hashes=fused,
             latency_s=time.time() - t0,
             metadata={"model": getattr(self.generator, "model_name", None),
-                      "n_context": len(gated), "abstained": abstained, **usage},
+                      "n_context": len(gated), "abstained": abstained,
+                      "query_type": plan.query_type, "n_subqueries": len(plan.sub_queries),
+                      **usage},
         )
 
     @traceable(name="rag_answer_stream", run_type="chain")
@@ -204,8 +290,8 @@ class RagPipeline:
         t0 = time.time()
         parts: list[str] = []
         with get_usage_metadata_callback() as cb:
-            search_query = condense_query(self.generator.llm, query, history)
-            _, gated = self._retrieve_gated(search_query, filter_dict)
+            plan = plan_query(self.generator.llm, query, history)
+            _, gated = self._retrieve_plan(plan, filter_dict)
             for token in stream_grounded(self.generator.llm, query, gated, history):
                 parts.append(token)
                 yield {"type": "token", "data": token}
