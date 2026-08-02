@@ -109,14 +109,28 @@ class ConversationStore:
             "metadata": metadata,
         }).execute()
 
+    def document_exists(self, user_id: str, content_hash: str) -> bool:
+        """True if this user already ingested a document with this content hash (dedup)."""
+        res = (
+            self.client.table("documents")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("content_hash", content_hash)
+            .eq("status", "success")
+            .limit(1)
+            .execute()
+        )
+        return bool(res.data)
+
     def save_document(self, filename: str, file_type: str | None, file_size: int | None,
                       num_chunks: int | None, pinecone_index: str | None, status: str,
                       ingestion_time_s: float | None = None, error: str | None = None,
-                      user_id: str | None = None) -> dict | None:
+                      user_id: str | None = None, content_hash: str | None = None) -> dict | None:
         res = self.client.table("documents").insert({
             "filename": filename, "file_type": file_type, "file_size": file_size,
             "num_chunks": num_chunks, "pinecone_index": pinecone_index, "status": status,
             "ingestion_time_s": ingestion_time_s, "error": error, "user_id": user_id,
+            "content_hash": content_hash,
         }).execute()
         return res.data[0] if res.data else None
 

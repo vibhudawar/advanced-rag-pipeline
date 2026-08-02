@@ -128,7 +128,7 @@ export async function listDocuments(token: string): Promise<DocumentRow[]> {
 export async function ingestDocument(
   file: File,
   token: string,
-): Promise<{ document: DocumentRow | null; num_chunks: number }> {
+): Promise<{ document: DocumentRow | null; num_chunks: number; duplicate?: boolean }> {
   const form = new FormData()
   form.append("file", file)
   const res = await fetch(`${baseUrl()}/ingest`, {
