@@ -21,7 +21,7 @@ from src.retrieval.hashing import (
     content_hash,  # noqa: F401  (re-exported for eval modules)
 )
 
-QType = Literal["factoid", "multi_hop", "aggregation", "unanswerable"]
+QType = Literal["factoid", "multi_hop", "comparison", "aggregation", "cross_company", "unanswerable"]
 Source = Literal["synthetic", "curated", "beir"]
 
 
@@ -34,6 +34,11 @@ class GoldenItem:
     q_type: QType
     source: Source = "synthetic"
     needs_review: bool = True         # synthetic items start unverified
+    # Filenames the answer SHOULD cite (multi-doc coverage). Empty when not applicable —
+    # e.g. simple single-doc factoids may set one, unanswerable items none. Chunk-level
+    # retrieval ground truth (relevant_chunk_hashes) is hard to author for multi-doc
+    # questions, so coverage is measured at the document (source-filename) level instead.
+    expected_sources: list[str] = field(default_factory=list)
 
     @property
     def is_answerable(self) -> bool:
@@ -76,6 +81,7 @@ class RunResult:
     candidate_hashes: list[str] = field(default_factory=list)  # retrieved, pre-rerank (retrieval quality)
     retrieved_hashes: list[str] = field(default_factory=list)  # final set handed to the generator (post-rerank)
     contexts: list[str] = field(default_factory=list)          # the chunk texts the generator saw
+    citations: list[dict] = field(default_factory=list)        # [{n, source, snippet, score}, ...] for citation checks
     latency_s: float = 0.0
     error: str | None = None
 
@@ -95,4 +101,7 @@ class ItemScore:
     # behaviour
     abstained: bool | None = None
     abstention_correct: bool | None = None
+    # citations / multi-doc coverage (None when not applicable)
+    citation_valid: bool | None = None      # inline [n] markers all resolve; abstention has no citations
+    source_coverage: float | None = None    # fraction of expected_sources actually cited
     notes: dict = field(default_factory=dict)
