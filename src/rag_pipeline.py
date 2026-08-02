@@ -246,11 +246,15 @@ class RagPipeline:
             return fused_all, []
 
         # Rerank the union against the overall question (a chunk about either side is relevant to
-        # a comparison), gate it, then spread the survivors across source documents.
+        # a comparison), then spread the survivors across source documents. We deliberately SKIP
+        # the LLM snippet gate here: it judges each chunk against the umbrella question, and a
+        # single chunk about one entity rarely looks like it "answers the comparison" on its own,
+        # so the gate collapses the diversified union and forces a false abstention. Relevance is
+        # already handled by per-sub-query retrieval + rerank; the generator still abstains via
+        # its own grounded-prompt rule if the assembled context genuinely doesn't support an answer.
         reranked = self.reranker.rerank(query=plan.standalone_query,
                                         documents=list(union.values()), top_k=self.union_rerank_k)
-        gated = reranked if not self.gate else self.gate.filter(plan.standalone_query, reranked)
-        diversified = _diversify(gated, self.per_doc_cap, self.multi_final_k)
+        diversified = _diversify(reranked, self.per_doc_cap, self.multi_final_k)
         return fused_all, diversified
 
     @traceable(name="rag_answer", run_type="chain")
