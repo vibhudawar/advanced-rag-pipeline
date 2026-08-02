@@ -44,6 +44,13 @@ CONTEXTUAL_RETRIEVAL = os.getenv("CONTEXTUAL_RETRIEVAL", "true").lower() == "tru
 CONTEXT_MODEL = os.getenv("CONTEXT_MODEL", "gpt-4o-mini")
 CONTEXT_MAX_DOC_CHARS = int(os.getenv("CONTEXT_MAX_DOC_CHARS", "40000"))
 
+# Financial-doc hygiene (Win 18): strip legal/disclosure boilerplate (per-page licensing
+# watermark, front-cover Reg-AC footer, and the trailing disclosures/jurisdiction/other-ticker
+# rating-table section) before chunking, so the report's thesis isn't crowded out and answers
+# can't be misattributed to a coverage-disclosure table. Conservative + best-effort — never
+# touches financial tables or the page-1 rating. See src/ingestion/boilerplate.py.
+STRIP_BOILERPLATE = os.getenv("STRIP_BOILERPLATE", "true").lower() == "true"
+
 # Web Search Configuration
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
