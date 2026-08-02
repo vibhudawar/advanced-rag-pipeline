@@ -85,3 +85,22 @@ Pre-fix, the comparison question abstained (the gate collapsed the union to one 
 gate-skip above is what fixed it. The aggregation question originally misrouted to `simple`
 until the planner's aggregation definition was broadened to cover "how do the analysts differ /
 is there consensus" phrasing.
+
+## Rejected — reranker-score gate on the simple path (negative result)
+The plan included replacing the LLM snippet gate (one `gpt-4o-mini` call/query) with a cheap
+reranker-score threshold: keep chunks with `rerank_score >= t`, abstain if none survive. It was
+calibrated on gen_golden (75 items, 15 unanswerable) by recording each query's top rerank score
+and splitting by answerable vs unanswerable:
+
+| Group | median top rerank score |
+|---|---|
+| answerable (n=60) | 0.938 (but ~18% score ~0 — retrieval genuinely failed) |
+| unanswerable (n=15) | 0.647 (max 0.775) |
+
+The distributions **overlap badly**: unanswerable questions retrieve *topically similar* chunks
+that the reranker scores high (median 0.647), because the reranker measures similarity, not
+answerability. Sweeping every threshold t∈[0,1], the **best achievable abstention accuracy is
+0.813** (at t=0.83, chosen in hindsight — optimistic), versus **0.900 for the LLM gate**. The
+gate's value is exactly that it reasons about whether a chunk *answers* the question, which the
+score cannot. So the gate stays; the score threshold is **not shipped**. The reranker keeps
+`min_score=0.0` (Win 12) and the LLM gate does the filtering on the simple path.
