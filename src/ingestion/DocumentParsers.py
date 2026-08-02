@@ -19,21 +19,39 @@ class PDFParser(DocumentParser):
     """PDF document parser"""
     
     def parse(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
-        """Parse a PDF. Uses pdfplumber, which preserves word spacing far better than PyPDF2
-        (PyPDF2 mangled runs into 'Implementedserver-side', hurting embeddings + readability)."""
+        """Parse a PDF to markdown/text.
+
+        Primary: pymupdf4llm (PyMuPDF) — reads multi-column layouts in the correct order and
+        emits markdown, so analyst-report sidebars / ratings boxes / author blocks are no longer
+        spliced into body sentences (a real failure of line-based extractors on 2-column docs).
+        The markdown structure also feeds structure-aware chunking. Falls back to pdfplumber if
+        PyMuPDF fails on a given file.
+        """
+        try:
+            import pymupdf
+            import pymupdf4llm
+            doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+            try:
+                text = pymupdf4llm.to_markdown(doc, show_progress=False).strip()
+                num_pages = doc.page_count
+            finally:
+                doc.close()
+            if text:
+                return {
+                    'text': text,
+                    'metadata': {'filename': filename, 'file_type': 'pdf', 'num_pages': num_pages},
+                }
+        except Exception as e:
+            print(f"[PARSE] pymupdf4llm failed for {filename}: {e}; falling back to pdfplumber")
+
+        # Fallback: pdfplumber (line-based; fine for single-column docs).
         try:
             with pdfplumber.open(BytesIO(file_bytes)) as pdf:
                 pages = [page.extract_text() or "" for page in pdf.pages]
                 num_pages = len(pdf.pages)
-            text = "\n".join(pages)
-
             return {
-                'text': text.strip(),
-                'metadata': {
-                    'filename': filename,
-                    'file_type': 'pdf',
-                    'num_pages': num_pages
-                }
+                'text': "\n".join(pages).strip(),
+                'metadata': {'filename': filename, 'file_type': 'pdf', 'num_pages': num_pages},
             }
         except Exception as e:
             raise RuntimeError(f"Failed to parse PDF: {str(e)}")
