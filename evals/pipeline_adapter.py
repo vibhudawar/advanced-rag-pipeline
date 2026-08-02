@@ -337,7 +337,7 @@ class ProductionPipeline:
             return RunResult(
                 query=query, answer=r.answer, candidate_hashes=r.candidate_hashes,
                 retrieved_hashes=[content_hash(c) for c in r.contexts],
-                contexts=r.contexts, latency_s=time.time() - t0,
+                contexts=r.contexts, citations=r.citations, latency_s=time.time() - t0,
             )
         except Exception as e:  # noqa: BLE001 - eval harness: capture, don't crash the run
             return RunResult(query=query, answer="", latency_s=time.time() - t0, error=str(e))

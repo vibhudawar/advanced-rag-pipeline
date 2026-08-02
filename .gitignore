@@ -182,6 +182,7 @@ langchain.db
 evals/reports/
 data/beir/
 data/golden.jsonl
+data/fin_golden.jsonl
 data/bm25_cache/
 
 # ============================================================================

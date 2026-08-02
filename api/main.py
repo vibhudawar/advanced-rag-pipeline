@@ -248,6 +248,13 @@ def _ingest_bytes(data: bytes, ext: str, filename: str, user_id: str) -> int:
     if not text:
         raise ValueError("No extractable text found in the document.")
 
+    # Financial-doc hygiene (Win 18): drop legal/disclosure boilerplate before anything
+    # downstream (metadata, chunking, contextualization) sees the text.
+    from config import STRIP_BOILERPLATE
+    if STRIP_BOILERPLATE:
+        from src.ingestion.boilerplate import strip_boilerplate
+        text = strip_boilerplate(text)
+
     # Doc-level metadata (company/ticker/doc_type/date/period/rating/topics) — best-effort,
     # nullable, non-null keys only. Rides on every chunk so retrieval can filter on it.
     doc_meta = extract_metadata(filename, text)
