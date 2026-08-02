@@ -1,5 +1,6 @@
 # Reads from .env file
 import os
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -55,6 +56,16 @@ INCLUDE_WEB_SEARCH = os.getenv("INCLUDE_WEB_SEARCH", "true").lower() == "true"
 VECTOR_TOP_K = int(os.getenv("VECTOR_TOP_K", "10"))
 WEB_SEARCH_RESULTS = int(os.getenv("WEB_SEARCH_RESULTS", "3"))
 FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "5"))
+
+# Phase 2: multi-query diversity retrieval. A query planner (src/retrieval/nlu.py) routes each
+# question to simple / comparison / aggregation. For the latter two it fans out one retrieval
+# pass per sub-query, reranks the union, then selects with a per-document cap so several source
+# documents reach the generator (which then synthesizes across them). Simple queries are
+# untouched — identical to the pre-Phase-2 single-query path. Toggle off to disable planning.
+RAG_MULTI_QUERY = os.getenv("RAG_MULTI_QUERY", "true").lower() == "true"
+RAG_UNION_RERANK_K = int(os.getenv("RAG_UNION_RERANK_K", "12"))  # rerank depth over the fan-out union
+RAG_PER_DOC_CAP = int(os.getenv("RAG_PER_DOC_CAP", "3"))         # max chunks from any one document
+RAG_MULTI_FINAL_K = int(os.getenv("RAG_MULTI_FINAL_K", "8"))     # context size for multi-doc answers
 
 # Supabase (WIN 7b). URL is shared with the Next.js client (NEXT_PUBLIC_*); the SECRET key
 # is server-side only (service role, bypasses RLS) — never expose it to the frontend.
