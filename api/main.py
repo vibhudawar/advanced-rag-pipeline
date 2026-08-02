@@ -253,7 +253,9 @@ def _ingest_bytes(data: bytes, ext: str, filename: str, user_id: str) -> int:
     doc_meta = extract_metadata(filename, text)
     metadata = {**parsed.get("metadata", {}), **doc_meta, "user_id": user_id,
                 "source": filename, "filename": filename}
-    chunks = get_chunker("recursive", chunk_size=CHUNK_SIZE,
+    # Structure-aware: split on the markdown headings pymupdf4llm produced (falls back to
+    # recursive for header-less text). Each chunk carries its `section` path.
+    chunks = get_chunker("markdown", chunk_size=CHUNK_SIZE,
                          chunk_overlap=CHUNK_OVERLAP).chunk_text(text, metadata)
     if len(chunks) > MAX_INGEST_CHUNKS:
         raise ValueError(
