@@ -11,6 +11,7 @@ are set on every response. Run: `uvicorn api.main:app`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -240,14 +241,18 @@ def _ingest_bytes(data: bytes, ext: str, filename: str, user_id: str) -> int:
     from src.ingestion.DBIngestion import get_vector_store
     from src.ingestion.DocumentParsers import parse_document
     from src.ingestion.EmbeddingCreator import get_embedder
+    from src.ingestion.metadata import extract_metadata
 
     parsed = parse_document(data, ext, filename)
     text = (parsed.get("text") or "").strip()
     if not text:
         raise ValueError("No extractable text found in the document.")
 
-    metadata = {**parsed.get("metadata", {}), "user_id": user_id, "source": filename,
-                "filename": filename}
+    # Doc-level metadata (company/ticker/doc_type/date/period/rating/topics) — best-effort,
+    # nullable, non-null keys only. Rides on every chunk so retrieval can filter on it.
+    doc_meta = extract_metadata(filename, text)
+    metadata = {**parsed.get("metadata", {}), **doc_meta, "user_id": user_id,
+                "source": filename, "filename": filename}
     chunks = get_chunker("recursive", chunk_size=CHUNK_SIZE,
                          chunk_overlap=CHUNK_OVERLAP).chunk_text(text, metadata)
     if len(chunks) > MAX_INGEST_CHUNKS:
@@ -291,21 +296,32 @@ async def ingest(file: UploadFile, user: CurrentUser):
         raise HTTPException(status_code=400, detail="Empty file.")
 
     file_type = ext.lstrip(".")
+
+    # Dedup: skip a file this user already ingested (same bytes) so re-uploads don't create
+    # duplicate vectors that would double-count in aggregation queries.
+    content_hash = hashlib.sha256(data).hexdigest()[:16]
+    try:
+        if store.document_exists(user.id, content_hash):
+            return {"document": None, "num_chunks": 0, "duplicate": True}
+    except Exception:
+        logger.exception("dedup check failed; continuing with ingest")
+
     t0 = time.time()
     try:
         num_chunks = _ingest_bytes(data, ext, filename, user.id)
     except ValueError as exc:
         store.save_document(filename, file_type, len(data), None, RAG_INDEX, "failed",
-                            error=str(exc)[:500], user_id=user.id)
+                            error=str(exc)[:500], user_id=user.id, content_hash=content_hash)
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("ingest failed")
         store.save_document(filename, file_type, len(data), None, RAG_INDEX, "failed",
-                            error="ingestion error", user_id=user.id)
+                            error="ingestion error", user_id=user.id, content_hash=content_hash)
         raise HTTPException(status_code=500, detail="internal error")
 
-    row = store.save_document(filename, file_type, len(data), num_chunks, RAG_INDEX,
-                              "success", ingestion_time_s=time.time() - t0, user_id=user.id)
+    row = store.save_document(filename, file_type, len(data), num_chunks, RAG_INDEX, "success",
+                              ingestion_time_s=time.time() - t0, user_id=user.id,
+                              content_hash=content_hash)
     reset_pipeline()  # next chat rebuilds BM25 including the new chunks
     return {"document": row, "num_chunks": num_chunks}
 
