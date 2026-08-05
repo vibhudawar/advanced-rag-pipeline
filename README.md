@@ -65,27 +65,7 @@ The pipeline is deliberately reliability-first:
 
 ## Architecture
 
-> The image below is a placeholder — replace it with the rendered diagram from the Mermaid
-> source in the collapsible block underneath.
-
-![System architecture](assets/mermaid%20graphs/detailed-flow-graph.png)
-
-<details>
-<summary>Architecture diagram (Mermaid source)</summary>
-
-```mermaid
-flowchart LR
-    U[User] --> FE["Next.js frontend<br/>(Vercel)"]
-    FE -->|"SSE: /stream, /ingest"| API["FastAPI backend<br/>(Render)"]
-    FE <-->|Auth| SB[("Supabase<br/>Auth + Postgres")]
-    API -->|JWT verify| SB
-    API --> PIPE[RAG pipeline]
-    PIPE --> PC[("Pinecone<br/>vector index")]
-    PIPE --> OAI["OpenAI<br/>embeddings + generation"]
-    PIPE --> CO["Cohere<br/>reranker"]
-    API -.->|traces / metrics| LS[LangSmith]
-```
-</details>
+![System architecture](assets/mermaid%20graphs/new-detailed-flow-graph.png)
 
 ## How it works
 
@@ -94,17 +74,7 @@ The system has two paths: an **ingestion** path that prepares documents for retr
 
 ### Ingestion
 
-```mermaid
-flowchart LR
-    F[PDF upload] --> P["Parse<br/>(pymupdf4llm → markdown,<br/>multi-column aware)"]
-    P --> S["Strip boilerplate<br/>(disclosures, watermarks)"]
-    S --> M["Extract metadata<br/>(company, ticker, date…)"]
-    M --> C["Structure-aware chunking<br/>(markdown headers)"]
-    C --> CTX["Contextualize<br/>(situating header per chunk)"]
-    CTX --> E[Embed]
-    E --> PC[("Pinecone upsert")]
-    S -.->|content hash| DD[Dedup]
-```
+![Ingestion pipeline flow](assets/mermaid%20graphs/Ingestion-pipeline-flow.png)
 
 1. **Parse** — PDFs are converted to markdown with `pymupdf4llm`, which reads multi-column
    layouts in the correct order (analyst reports, papers).
@@ -120,18 +90,7 @@ flowchart LR
 
 ### Query
 
-```mermaid
-flowchart TD
-    Q[Question + history] --> PLAN["Query planner<br/>(route + decompose)"]
-    PLAN --> HYB["Hybrid retrieval<br/>(vector + BM25 → RRF)"]
-    HYB --> RR[Cohere rerank]
-    RR --> BR{Multi-document?}
-    BR -->|comparison / aggregation| DVS[Diversify across source docs]
-    BR -->|simple| GATE[LLM snippet gate]
-    DVS --> GEN["Grounded generation<br/>(cite · synthesize · abstain)"]
-    GATE --> GEN
-    GEN --> A[Streamed answer + citations + metrics]
-```
+![Query flow](assets/mermaid%20graphs/query-flow.png)
 
 1. **Plan** — resolve the follow-up against history and classify the question. `simple`
    questions take the single-query path; `comparison`/`aggregation` emit focused sub-queries.
