@@ -18,6 +18,7 @@ corpora; for large corpora move the lexical half into the search engine (see hyb
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -147,6 +148,24 @@ def _citation(doc: Document, n: int) -> dict:
     }
 
 
+_CITE_MARKERS = re.compile(r"\[(\d+)\]")
+
+
+def _build_citations(answer: str, gated: list[Document]) -> list[dict]:
+    """Sources for an answer = only the snippets the answer actually cites inline (by ``[n]``).
+
+    The generator sees the whole retrieved context numbered ``[1..N]`` but usually grounds its
+    answer in a subset; listing the unused chunks is misleading (a listed 'source' may even
+    contradict the answer). We keep each cited snippet's original number so the inline markers
+    still resolve. Falls back to the full set only when the answer carries no valid marker, so a
+    genuine answer never renders an empty Sources list.
+    """
+    all_c = [_citation(d, i + 1) for i, d in enumerate(gated)]
+    referenced = {int(n) for n in _CITE_MARKERS.findall(answer or "")}
+    cited = [c for c in all_c if c["n"] in referenced]
+    return cited or all_c
+
+
 class RagPipeline:
     def __init__(self, index_name: str, top_k: int = 10, rerank_top_k: int = 5,
                  rrf_k: int = 60, use_gate: bool = True, multi_query: bool | None = None,
@@ -273,8 +292,9 @@ class RagPipeline:
             usage = summarize_usage(cb.usage_metadata)
         abstained = is_abstention(ans)
         # No answer → no citations. A source under "I don't know" is contradictory (the gate can
-        # pass a topically-adjacent chunk the generator then judges insufficient).
-        citations = [] if abstained else [_citation(d, i + 1) for i, d in enumerate(gated)]
+        # pass a topically-adjacent chunk the generator then judges insufficient). Otherwise list
+        # only the snippets the answer actually cited, not everything retrieval fed the model.
+        citations = [] if abstained else _build_citations(ans, gated)
         return AnswerResult(
             answer=ans,
             citations=citations,
@@ -304,7 +324,7 @@ class RagPipeline:
         # have enough information", which is misleading.
         answer = "".join(parts)
         abstained = is_abstention(answer)
-        citations = [] if abstained else [_citation(d, i + 1) for i, d in enumerate(gated)]
+        citations = [] if abstained else _build_citations(answer, gated)
         yield {"type": "citations", "data": citations}
         yield {"type": "meta", "data": {
             "latency_ms": round((time.time() - t0) * 1000),
