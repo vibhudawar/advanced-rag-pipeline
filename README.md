@@ -13,7 +13,7 @@ generation change is proven against metrics, not asserted.
 ![OpenAI](https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=flat&logo=supabase&logoColor=white)
 
-**Live demo:** https://advanced-rag-pipeline.vercel.app · **Walkthrough video:** _coming soon_
+**Live demo:** https://advanced-rag-pipeline.vercel.app · **Walkthrough video:** https://youtu.be/O0mlcQ9cy9o
 
 ---
 
